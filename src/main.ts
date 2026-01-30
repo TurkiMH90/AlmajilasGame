@@ -95,12 +95,18 @@ class Game {
   private setupScenes(): void {
     // Initialize board scene
     this.sceneManager.initBoardScene(
-      () => this.handleDiceRoll(),
+      () => { /* dice roll callback - handled by HUD button */ },
       () => this.handlePawnMoveComplete()
     );
 
     // Initialize minigame scene
     this.sceneManager.initMinigameScene(() => { });
+
+    // Pre-load the 3D dice model
+    const boardScene = this.sceneManager.getBoardScene();
+    if (boardScene) {
+      boardScene.loadDice();
+    }
   }
 
   /**
@@ -142,7 +148,7 @@ class Game {
   /**
    * Handle dice roll button click
    */
-  private handleRollDice(): void {
+  private async handleRollDice(): Promise<void> {
     if (this.isMoving) return;
 
     try {
@@ -152,20 +158,38 @@ class Game {
         return;
       }
 
+      // Disable roll button during dice animation
+      this.isMoving = true;
+
+      // Get the dice result first (but don't show it yet)
       const diceResult = this.turnMachine.rollDice();
       console.log('Dice rolled:', diceResult);
 
-      // Show dice roll feedback
-      this.hud.showDiceRoll(diceResult);
+      // Get current player for positioning
+      const gameState = this.turnMachine.getGameState();
+      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
 
+      // Play 3D dice animation (5 seconds)
+      const boardScene = this.sceneManager.getBoardScene();
+      if (boardScene) {
+        await boardScene.rollDice3D(currentPlayer.id, diceResult);
+      }
+
+      // Show dice result in HUD after animation
+      this.hud.showDiceRoll(diceResult);
       this.updateUI();
 
-      // Trigger movement after dice animation completes
-      setTimeout(() => {
-        this.handleMove();
-      }, 1600); // Wait for dice animation to finish
+      // Re-enable and start movement
+      this.isMoving = false;
+
+      // Debug: Verify dice result matches what was rolled
+      const moveGameState = this.turnMachine.getGameState();
+      console.log(`About to move. Dice shown: ${diceResult}, GameState diceResult: ${moveGameState.diceResult}`);
+
+      this.handleMove();
     } catch (error) {
       console.error('Error rolling dice:', error);
+      this.isMoving = false;
     }
   }
 
@@ -376,6 +400,16 @@ class Game {
       const isActive = !this.isMoving &&
         (currentState === 'TURN_START' || currentState === 'ROLL_DICE' || currentState === 'MOVE');
       boardScene.setActiveTurn(isActive);
+
+      // Show/hide spinning dice above current player
+      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+      if (currentPlayer && (currentState === 'TURN_START' || currentState === 'ROLL_DICE')) {
+        // Show dice above current player, spinning continuously
+        boardScene.showDiceAbovePlayer(currentPlayer.id);
+      } else {
+        // Hide dice during movement or other states
+        // (rollDice3D handles hiding after the slowdown animation)
+      }
     }
   }
 }

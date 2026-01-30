@@ -58,6 +58,15 @@ export class BoardScene {
   private buildings: any[] = [];
   private waterPlane: any = null;
 
+  // 3D Dice system
+  private diceNode: TransformNode | null = null;
+  private diceMeshes: Mesh[] = [];
+  private diceSpinning: boolean = false;
+  private diceSpinSpeed: number = 0;
+  private targetDiceResult: number = 1;
+  private diceGlow: Mesh | null = null;
+  private diceResolve: (() => void) | null = null;
+
   constructor(engine: Engine, onDiceRoll: () => void, onPawnMoveComplete: () => void) {
     this.engine = engine;
     this.onDiceRoll = onDiceRoll;
@@ -793,7 +802,7 @@ export class BoardScene {
     panel.id = 'camera-adjust-panel';
     panel.style.cssText = `
       position: fixed;
-      top: 150px;
+      top: 280px;
       right: 20px;
       background: rgba(0,0,0,0.85);
       color: white;
@@ -877,7 +886,62 @@ export class BoardScene {
     };
     panel.appendChild(printBtn);
 
+    // Dice test section
+    const diceSection = document.createElement('div');
+    diceSection.style.cssText = 'margin-top: 15px; border-top: 1px solid #555; padding-top: 10px;';
+
+    const diceTitle = document.createElement('div');
+    diceTitle.textContent = '🎲 Test Dice Face';
+    diceTitle.style.cssText = 'font-weight: bold; margin-bottom: 8px; font-size: 12px;';
+    diceSection.appendChild(diceTitle);
+
+    const diceButtonsRow = document.createElement('div');
+    diceButtonsRow.style.cssText = 'display: flex; gap: 5px; flex-wrap: wrap;';
+
+    for (let i = 1; i <= 6; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = String(i);
+      btn.style.cssText = 'width: 32px; height: 32px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;';
+      btn.onmouseenter = () => btn.style.background = '#c0392b';
+      btn.onmouseleave = () => btn.style.background = '#e74c3c';
+      btn.onclick = () => {
+        console.log(`Testing dice face: ${i}`);
+        this.testDiceFace(i);
+      };
+      diceButtonsRow.appendChild(btn);
+    }
+
+    diceSection.appendChild(diceButtonsRow);
+    panel.appendChild(diceSection);
+
     document.body.appendChild(panel);
+  }
+
+  /**
+   * Test a specific dice face for visual verification
+   */
+  public testDiceFace(faceNumber: number): void {
+    if (!this.diceNode) {
+      this.loadDice();
+      setTimeout(() => this.testDiceFace(faceNumber), 300);
+      return;
+    }
+
+    // Position dice in view
+    const activePawn = this.pawns.get(this.activePlayerId) || this.pawns.values().next().value;
+    if (activePawn) {
+      this.diceNode.position = new Vector3(activePawn.position.x, activePawn.position.y + 3, activePawn.position.z);
+    } else {
+      this.diceNode.position = new Vector3(0, 5, 0);
+    }
+
+    // Set rotation for requested face
+    const targetRotation = this.getRotationForDiceResult(faceNumber);
+    this.diceNode.rotation = targetRotation;
+    this.diceNode.setEnabled(true);
+    this.diceSpinning = false;
+
+    console.log(`Dice set to face ${faceNumber} with rotation: (${targetRotation.x.toFixed(2)}, ${targetRotation.y.toFixed(2)}, ${targetRotation.z.toFixed(2)})`);
   }
 
   /**
@@ -1180,5 +1244,337 @@ export class BoardScene {
 
   private setupInput(): void {
     // Input handling if needed
+  }
+
+  // =====================================================
+  // 3D DICE ROLLING SYSTEM
+  // =====================================================
+
+  /**
+   * Load the 3D dice model
+   */
+  public loadDice(): void {
+    if (this.diceNode) return; // Already loaded
+
+    this.diceNode = new TransformNode('diceNode', this.scene);
+    this.diceNode.setEnabled(false); // Hidden by default
+
+    SceneLoader.ImportMesh(
+      '',
+      '/models/',
+      'dice.glb',
+      this.scene,
+      (meshes) => {
+        if (meshes.length === 0) {
+          console.warn('Failed to load dice model - no meshes');
+          return;
+        }
+
+        console.log(`Dice loaded: ${meshes.length} meshes`);
+        meshes.forEach((m, i) => console.log(`  [${i}] ${m.name} (parent: ${m.parent?.name || 'none'})`));
+
+        // Parent root to our node
+        const rootNode = meshes.find(m => m.name.includes('__root__')) || meshes[0];
+        rootNode.parent = this.diceNode;
+
+        // Store meshes, make them visible - preserve original materials
+        meshes.forEach((mesh) => {
+          if (mesh instanceof Mesh) {
+            this.diceMeshes.push(mesh);
+            mesh.isVisible = true;
+          }
+
+          // Make sure mesh is enabled
+          mesh.setEnabled(true);
+
+          // Log material info for debugging
+          if (mesh.material) {
+            console.log(`  Dice mesh ${mesh.name} has material: ${mesh.material.name}`);
+          }
+        });
+
+        // Scale dice - the model is very small, use a much larger scale
+        this.diceNode!.scaling = new Vector3(15, 15, 15);
+
+        // No glow disc - just the dice
+        console.log('3D Dice loaded successfully, meshes:', this.diceMeshes.length);
+      },
+      (progress) => {
+        console.log(`Loading dice: ${Math.round((progress.loaded / progress.total) * 100)}%`);
+      },
+      (scene, message) => {
+        console.error('Error loading dice:', message);
+      }
+    );
+  }
+
+  /**
+   * Create a glow disc beneath the dice for visual effect
+   */
+  private createDiceGlow(): void {
+    this.diceGlow = MeshBuilder.CreateDisc('diceGlow', { radius: 0.15, tessellation: 32 }, this.scene);
+    this.diceGlow.rotation.x = Math.PI / 2;
+    this.diceGlow.parent = this.diceNode;
+    this.diceGlow.position.y = -0.1;
+
+    const glowMat = new StandardMaterial('diceGlowMat', this.scene);
+    glowMat.diffuseColor = new Color3(0.2, 0.6, 1);
+    glowMat.emissiveColor = new Color3(0.1, 0.4, 0.8);
+    glowMat.alpha = 0.4;
+    glowMat.backFaceCulling = false;
+    this.diceGlow.material = glowMat;
+  }
+
+  /**
+   * Show dice above a specific player and start rolling animation
+   * @param playerId - The player ID to show dice above
+   * @param result - The final number the dice will land on (1-6)
+   * @returns Promise that resolves when dice animation completes
+   */
+  public async rollDice3D(playerId: number, result: number): Promise<void> {
+    if (!this.diceNode) {
+      this.loadDice();
+      // Wait a frame for loading
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    if (!this.diceNode) return;
+
+    const pawn = this.pawns.get(playerId);
+    if (!pawn) return;
+
+    this.targetDiceResult = result;
+
+    // Position dice above the player
+    const pawnPos = pawn.position.clone();
+    this.diceNode.position = new Vector3(pawnPos.x, pawnPos.y + 4, pawnPos.z);
+    this.diceNode.rotation = new Vector3(0, 0, 0);
+    this.diceNode.setEnabled(true);
+
+    // Start with spin animation
+    this.diceSpinning = true;
+    this.diceSpinSpeed = 15; // Fast initial spin (radians per second)
+
+    // Animate the dice roll over 5 seconds
+    return new Promise<void>((resolve) => {
+      this.diceResolve = resolve;
+      this.startDiceRollAnimation();
+    });
+  }
+
+  /**
+   * Main dice roll animation loop - spins fast then slows down
+   */
+  private startDiceRollAnimation(): void {
+    const totalDuration = 5000; // 5 seconds
+    const startTime = performance.now();
+    const initialSpeed = 15;
+
+    // Calculate target rotation based on result
+    const targetRotation = this.getRotationForDiceResult(this.targetDiceResult);
+
+    const animate = () => {
+      if (!this.diceNode || !this.diceSpinning) return;
+
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / totalDuration, 1);
+
+      // Exponential slowdown: speed decreases as progress increases
+      // Using easing function for dramatic slowdown at the end
+      const easedProgress = this.easeOutExpo(progress);
+      this.diceSpinSpeed = initialSpeed * (1 - easedProgress);
+
+      // Apply rotation - spin on Y axis with decreasing wobble
+      const deltaTime = this.engine.getDeltaTime() / 1000;
+      const time = performance.now() / 1000;
+      this.diceNode.rotation.y += this.diceSpinSpeed * deltaTime;
+      // Wobble decreases as dice slows down
+      const wobbleStrength = (1 - easedProgress) * 0.3;
+      this.diceNode.rotation.x = Math.sin(time * 3) * wobbleStrength;
+      this.diceNode.rotation.z = Math.cos(time * 2.5) * wobbleStrength;
+
+      // Floating bob effect
+      const bobOffset = Math.sin(elapsed / 200) * 0.1;
+      const pawn = this.pawns.get(this.activePlayerId);
+      if (pawn) {
+        this.diceNode.position.y = pawn.position.y + 3 + bobOffset;
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        // Animation complete - snap to final rotation
+        this.finalizeDiceRoll(targetRotation);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Get target rotation for a dice result (1-6)
+   * Calibrated based on testing with the actual dice model
+   */
+  private getRotationForDiceResult(result: number): Vector3 {
+    const piHalf = Math.PI / 2;
+
+    // Tested mappings for this dice model:
+    // - Face 3 & 4 are on X-axis (0 and π)
+    // - Face 5 & 6 are on X-axis (±π/2)  
+    // - Face 1 & 2 are on Y-axis (±π/2)
+    switch (result) {
+      case 1: return new Vector3(0, -piHalf, 0);        // 1 on top (swapped with 2)
+      case 2: return new Vector3(0, piHalf, 0);         // 2 on top (swapped with 1)
+      case 3: return new Vector3(0, 0, 0);              // 3 on top ✓ (tested working)
+      case 4: return new Vector3(Math.PI, 0, 0);        // 4 on top ✓ (tested working)
+      case 5: return new Vector3(-piHalf, 0, 0);        // 5 on top (was showing for case 6)
+      case 6: return new Vector3(piHalf, 0, 0);         // 6 on top (was showing for case 1)
+      default: return new Vector3(0, 0, 0);
+    }
+  }
+
+  /**
+   * Exponential ease-out function for dramatic slowdown
+   */
+  private easeOutExpo(x: number): number {
+    return x === 1 ? 1 : 1 - Math.pow(2, -10 * x);
+  }
+
+  /**
+   * Finalize the dice roll with a bounce and snap to final rotation
+   */
+  private finalizeDiceRoll(targetRotation: Vector3): void {
+    if (!this.diceNode) return;
+
+    this.diceSpinning = false;
+
+    console.log(`Finalizing dice: target result ${this.targetDiceResult}, rotation: (${targetRotation.x.toFixed(2)}, ${targetRotation.y.toFixed(2)}, ${targetRotation.z.toFixed(2)})`);
+
+    // Snap directly to the exact target rotation
+    const snapAnim = new Animation(
+      'diceSnap',
+      'rotation',
+      60,
+      Animation.ANIMATIONTYPE_VECTOR3,
+      Animation.ANIMATIONLOOPMODE_CONSTANT
+    );
+
+    const currentRot = this.diceNode.rotation.clone();
+
+    snapAnim.setKeys([
+      { frame: 0, value: currentRot },
+      { frame: 40, value: targetRotation }  // Slightly longer animation for smoothness
+    ]);
+
+    const ease = new CubicEase();
+    ease.setEasingMode(EasingFunction.EASINGMODE_EASEOUT);
+    snapAnim.setEasingFunction(ease);
+
+    // Bounce scale animation
+    const bounceAnim = new Animation(
+      'diceBounce',
+      'scaling',
+      60,
+      Animation.ANIMATIONTYPE_VECTOR3,
+      Animation.ANIMATIONLOOPMODE_CONSTANT
+    );
+
+    const baseScale = new Vector3(15, 15, 15);
+    const bigScale = new Vector3(17, 17, 17);
+
+    bounceAnim.setKeys([
+      { frame: 0, value: baseScale },
+      { frame: 20, value: bigScale },
+      { frame: 40, value: baseScale }
+    ]);
+
+    this.diceNode.animations = [snapAnim, bounceAnim];
+    this.scene.beginAnimation(this.diceNode, 0, 40, false, 1, () => {
+      // Wait 1 second then hide dice and resolve
+      setTimeout(() => {
+        this.hideDice();
+        if (this.diceResolve) {
+          this.diceResolve();
+          this.diceResolve = null;
+        }
+      }, 1000);
+    });
+  }
+
+  /**
+   * Hide the dice
+   */
+  public hideDice(): void {
+    this.diceSpinning = false;
+    if (this.diceNode) {
+      this.diceNode.setEnabled(false);
+    }
+  }
+
+  /**
+   * Show dice floating and spinning above the current player
+   * Call this at the start of each turn to make the dice visible
+   */
+  public showDiceAbovePlayer(playerId: number): void {
+    if (!this.diceNode) {
+      this.loadDice();
+      // Try again after a short delay for loading
+      setTimeout(() => this.showDiceAbovePlayer(playerId), 300);
+      return;
+    }
+
+    const pawn = this.pawns.get(playerId);
+    if (!pawn) {
+      console.warn('No pawn found for player', playerId);
+      return;
+    }
+
+    this.activePlayerId = playerId;
+
+    // Position dice just above the player's head
+    const pawnPos = pawn.position.clone();
+    this.diceNode.position = new Vector3(pawnPos.x, pawnPos.y + 3, pawnPos.z);
+    this.diceNode.rotation = new Vector3(0, 0, 0);
+    this.diceNode.setEnabled(true);
+
+    // Start continuous spinning
+    if (!this.diceSpinning) {
+      this.diceSpinning = true;
+      this.diceSpinSpeed = 12;
+      this.startContinuousSpin();
+    }
+
+    console.log('Dice shown above player', playerId);
+  }
+
+  /**
+   * Continuous spinning animation loop (runs until hideDice or rollDice3D is called)
+   */
+  private startContinuousSpin(): void {
+    const spinLoop = () => {
+      if (!this.diceNode || !this.diceSpinning) return;
+
+      const deltaTime = this.engine.getDeltaTime() / 1000;
+      const time = performance.now() / 1000;
+
+      // Spin primarily on Y axis (like a top) with gentle wobble
+      this.diceNode.rotation.y += this.diceSpinSpeed * deltaTime;
+      // Add subtle wobble on other axes for natural look
+      this.diceNode.rotation.x = Math.sin(time * 3) * 0.2;
+      this.diceNode.rotation.z = Math.cos(time * 2.5) * 0.15;
+
+      // Floating bob effect
+      const bobOffset = Math.sin(time * 2) * 0.2;
+      const pawn = this.pawns.get(this.activePlayerId);
+      if (pawn && this.diceNode.isEnabled()) {
+        this.diceNode.position.x = pawn.position.x;
+        this.diceNode.position.y = pawn.position.y + 3 + bobOffset;
+        this.diceNode.position.z = pawn.position.z;
+      }
+
+      requestAnimationFrame(spinLoop);
+    };
+
+    requestAnimationFrame(spinLoop);
   }
 }
