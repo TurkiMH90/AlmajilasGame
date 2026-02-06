@@ -1,51 +1,34 @@
 import { Player } from '../core/game-state';
-import { Engine } from '@babylonjs/core/Engines/engine';
-import { Scene } from '@babylonjs/core/scene';
-import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
-import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
-import { Vector3, Color4, Color3 } from '@babylonjs/core/Maths/math';
-import { SceneLoader } from '@babylonjs/core/Loading/sceneLoader';
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
-import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
-import { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
-import '@babylonjs/loaders/glTF';
+import { CharacterPreviewScene } from '../babylon/character-preview-scene';
 
 export interface GameConfig {
   players: Player[];
 }
 
 const AVAILABLE_CHARACTERS = [
-  { name: 'Amy Rose', file: 'amy_rose.glb', color: '#FF69B4', rotX: -Math.PI / 2, rotY: -Math.PI / 2, portrait: '/portraits/amy_portrait_1768325081799.png' },
-  { name: 'Bunny', file: 'free_fire_new_bunny_bundle_3d_model.glb', color: '#8B4513', rotX: -Math.PI / 2, portrait: '/portraits/bunny_portrait_1768325186683.png' },
-  { name: 'Devil', file: 'red_humonoid_devil_3d_model.glb', color: '#FF0000', rotX: 0, portrait: '/portraits/devil_portrait_1768325152677.png' },
-  { name: 'Robot', file: 'sci-fi_o.b._robot_unit_th-icc02_animated.glb', color: '#888888', rotX: -Math.PI / 2, portrait: '/portraits/robot_portrait_1768325123268.png' },
-  { name: 'Sonic', file: 'sonic.glb', color: '#0066FF', rotX: -Math.PI / 2, portrait: '/portraits/sonic_portrait_1768324977204.png' },
-  { name: 'Werehog', file: 'sonic_unleashed_-_werehog_sonic.glb', color: '#4B0082', rotX: -Math.PI / 2, portrait: '/portraits/werehog_portrait_1768325203286.png' },
-  { name: 'Knuckles', file: 'srb2-knuckles.glb', color: '#FF4500', rotX: -Math.PI / 2, portrait: '/portraits/knuckles_portrait_1768325066601.png' },
-  { name: 'Metal Sonic', file: 'srb2-metal_sonic.glb', color: '#C0C0C0', rotX: -Math.PI / 2, portrait: '/portraits/metal_sonic_portrait_1768325217744.png' },
-  { name: 'Soldier', file: 'stylized_sci-_fi_soldier_animated.glb', color: '#006400', rotX: -Math.PI / 2, portrait: '/portraits/soldier_portrait_1768325138593.png' },
-  { name: 'Tree Man', file: 'tree_man.glb', color: '#228B22', rotX: 0, portrait: '/portraits/tree_man_portrait_1768325231500.png' },
-  { name: 'Amy W', file: 'werehog_amy_rose.glb', color: '#9932CC', rotX: 0, portrait: '/portraits/amy_w_portrait_1768325265082.png' },
+  { name: 'Amy Rose', file: 'amy_rose.glb', color: '#FF69B4', portrait: '/portraits/amy_portrait_1768325081799.png' },
+  { name: 'Bunny', file: 'free_fire_new_bunny_bundle_3d_model.glb', color: '#8B4513', portrait: '/portraits/bunny_portrait_1768325186683.png' },
+  { name: 'Devil', file: 'red_humonoid_devil_3d_model.glb', color: '#FF0000', portrait: '/portraits/devil_portrait_1768325152677.png' },
+  { name: 'Robot', file: 'sci-fi_o.b._robot_unit_th-icc02_animated.glb', color: '#888888', portrait: '/portraits/robot_portrait_1768325123268.png' },
+  { name: 'Sonic', file: 'sonic.glb', color: '#0066FF', portrait: '/portraits/sonic_portrait_1768324977204.png' },
+  { name: 'Werehog', file: 'sonic_unleashed_-_werehog_sonic.glb', color: '#4B0082', portrait: '/portraits/werehog_portrait_1768325203286.png' },
+  { name: 'Knuckles', file: 'srb2-knuckles.glb', color: '#FF4500', portrait: '/portraits/knuckles_portrait_1768325066601.png' },
+  { name: 'Metal Sonic', file: 'srb2-metal_sonic.glb', color: '#C0C0C0', portrait: '/portraits/metal_sonic_portrait_1768325217744.png' },
+  { name: 'Soldier', file: 'stylized_sci-_fi_soldier_animated.glb', color: '#006400', portrait: '/portraits/soldier_portrait_1768325138593.png' },
+  { name: 'Tree Man', file: 'tree_man.glb', color: '#228B22', portrait: '/portraits/tree_man_portrait_1768325231500.png' },
+  { name: 'Dark Knight', file: 'dark_knight__spiked_black_armored_warrior.glb', color: '#1a1a2e', portrait: '/portraits/dark_knight_portrait.png' },
 ];
 
-const PLAYER_COLORS = ['#FF3333', '#33CC33', '#3399FF', '#FFCC00'];
+const PLAYER_COLORS = ['#FF6B35', '#4ECDC4', '#45B7D1', '#96CEB4'];
 
 export class SelectionScreen {
   private container: HTMLElement;
   private onStart: (config: GameConfig) => void;
   private players: Player[] = [];
   private playerCount: number = 2;
-  private currentPlayerSelecting: number = 0;
-  private selectedCharacters: number[] = [];
-
-  // Single shared preview engine
-  private previewEngine: Engine | null = null;
-  private previewScene: Scene | null = null;
-  private previewCamera: ArcRotateCamera | null = null;
-  private loadedModels: Map<number, TransformNode> = new Map();
-  private currentPreviewIndex: number = -1;
-  private hoveredIndex: number = -1;
+  private characterIndices: number[] = []; // Current character index per player
+  private readyStates: boolean[] = []; // Ready status per player
+  private previewScenes: CharacterPreviewScene[] = []; // 3D preview scenes per player
 
   constructor(container: HTMLElement, onStart: (config: GameConfig) => void) {
     this.container = container;
@@ -54,35 +37,72 @@ export class SelectionScreen {
   }
 
   private clear(): void {
-    if (this.previewEngine) {
-      this.previewEngine.dispose();
-      this.previewEngine = null;
-      this.previewScene = null;
-      this.previewCamera = null;
-      this.loadedModels.clear();
-    }
+    // Dispose all preview scenes before clearing
+    this.disposePreviewScenes();
     this.container.innerHTML = '';
+  }
+
+  private disposePreviewScenes(): void {
+    this.previewScenes.forEach(scene => scene.dispose());
+    this.previewScenes = [];
   }
 
   private renderModeSelection(): void {
     this.clear();
     this.container.innerHTML = `
-      <div class="mario-select-screen" dir="rtl">
-        <div class="mario-title">
-          <h1>🎮 لعبة المجلس 🎮</h1>
-          <p>اختر عدد اللاعبين</p>
+      <div class="selection-screen" dir="rtl">
+        <!-- Top Navigation Bar -->
+        <nav class="selection-nav">
+          <div class="nav-right">
+            <div class="brand-logo">
+              <span class="brand-icon dice-logo">🎲</span>
+              <span class="brand-name">خطاوينا</span>
+            </div>
+          </div>
+          <div class="nav-center">
+            <!-- Optional Center Content -->
+          </div>
+          <div class="nav-left">
+            <button class="nav-btn">
+              <span class="nav-icon">❓</span>
+              كيفية اللعب
+            </button>
+            <button class="nav-btn">
+              <span class="nav-icon">⚙️</span>
+              الإعدادات
+            </button>
+          </div>
+        </nav>
+
+        <div class="selection-content">
+          <div class="selection-header">
+            <h1> مرحباً بك في خطاوينا</h1>
+            <p>اختر عدد اللاعبين للبدء</p>
+          </div>
+          <div class="player-count-options">
+            <button class="count-btn" data-count="2">
+              <span class="count-num">2</span>
+              <span class="count-label">لاعبان</span>
+            </button>
+            <button class="count-btn" data-count="3">
+              <span class="count-num">3</span>
+              <span class="count-label">لاعبين</span>
+            </button>
+            <button class="count-btn" data-count="4">
+              <span class="count-num">4</span>
+              <span class="count-label">لاعبين</span>
+            </button>
+          </div>
         </div>
-        <div class="player-count-row">
-          <button class="player-count-btn" data-count="2">لاعبان</button>
-          <button class="player-count-btn" data-count="3">٣ لاعبين</button>
-          <button class="player-count-btn" data-count="4">٤ لاعبين</button>
-        </div>
+        
+        <!-- Empty footer for visual balance -->
+        <footer class="selection-footer-bar" style="visibility: hidden;"></footer>
       </div>
     `;
 
-    this.container.querySelectorAll('.player-count-btn').forEach(btn => {
+    this.container.querySelectorAll('.count-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        this.playerCount = parseInt((e.target as HTMLElement).dataset.count || '2');
+        this.playerCount = parseInt((e.currentTarget as HTMLElement).dataset.count || '2');
         this.initializePlayers();
         this.renderCharacterSelection();
       });
@@ -91,93 +111,165 @@ export class SelectionScreen {
 
   private initializePlayers(): void {
     this.players = [];
-    this.selectedCharacters = [];
-    this.currentPlayerSelecting = 0;
+    this.characterIndices = [];
+    this.readyStates = [];
 
     for (let i = 0; i < this.playerCount; i++) {
+      // Give each player a different starting character
+      const startChar = i % AVAILABLE_CHARACTERS.length;
+      this.characterIndices.push(startChar);
+      this.readyStates.push(false);
+
+      const char = AVAILABLE_CHARACTERS[startChar];
       this.players.push({
         id: i,
         name: `اللاعب ${i + 1}`,
         isTeam: false,
-        characterModel: '',
-        characterName: '',
-        portrait: '',
+        characterModel: char.file,
+        characterName: char.name,
+        portrait: char.portrait,
         color: PLAYER_COLORS[i],
         pawnPosition: 0,
         points: 0
       });
-      this.selectedCharacters.push(-1);
     }
   }
 
   private renderCharacterSelection(): void {
-    this.clear();
+    // Dispose previous scenes but don't clear yet
+    this.disposePreviewScenes();
+    this.container.innerHTML = '';
 
-    // Build character grid with colored boxes
-    let charGridHtml = '';
-    AVAILABLE_CHARACTERS.forEach((char, idx) => {
-      const isUsed = this.selectedCharacters.includes(idx);
-      charGridHtml += `
-        <div class="char-select-item ${isUsed ? 'used' : ''}" data-idx="${idx}" 
-             style="--char-color: ${char.color}">
-          <div class="char-select-name">${char.name}</div>
+    // Build player cards with 3D canvas
+    let cardsHtml = '';
+    for (let i = 0; i < this.playerCount; i++) {
+      const charIdx = this.characterIndices[i];
+      const char = AVAILABLE_CHARACTERS[charIdx];
+      const isReady = this.readyStates[i];
+      const playerColor = PLAYER_COLORS[i];
+
+      cardsHtml += `
+        <div class="player-card glass-card" style="--player-color: ${playerColor}">
+          <div class="card-header">
+            <span class="player-label">اللاعب ${i + 1}</span>
+          </div>
+          
+          <div class="card-content">
+            <button class="nav-arrow nav-prev" data-player="${i}" data-dir="-1">❮</button>
+            
+            <div class="character-display">
+                <div class="portrait-frame portrait-frame-3d" style="border-color: ${playerColor}">
+                  <canvas id="preview-canvas-${i}" class="character-preview-canvas" width="280" height="320"></canvas>
+                </div>
+                <div class="card-name">${char.name}</div>
+            </div>
+
+            <button class="nav-arrow nav-next" data-player="${i}" data-dir="1">❯</button>
+          </div>
+
+          <button class="ready-btn ${isReady ? 'is-ready' : ''}" data-player="${i}">
+            ${isReady ? '✓ جاهز' : 'غير جاهز'}
+          </button>
         </div>
       `;
-    });
+    }
 
-    // Build selected players display
-    let selectedHtml = '';
-    for (let i = 0; i < this.playerCount; i++) {
-      const isActive = i === this.currentPlayerSelecting;
-      const charIdx = this.selectedCharacters[i];
-      const char = charIdx >= 0 ? AVAILABLE_CHARACTERS[charIdx] : null;
-      selectedHtml += `
-        <div class="selected-player ${isActive ? 'active' : ''}" style="border-color: ${PLAYER_COLORS[i]}">
-          <span class="sp-label" style="background: ${PLAYER_COLORS[i]}">ل${i + 1}</span>
-          <span class="sp-name">${char ? char.name : '---'}</span>
+    const allReady = this.readyStates.every(r => r);
+    const readyCount = this.readyStates.filter(r => r).length;
+
+    // Generate player status circles for footer
+    let playerCirclesHtml = '';
+    for (let i = this.playerCount - 1; i >= 0; i--) {
+      const isReady = this.readyStates[i];
+      const playerColor = PLAYER_COLORS[i];
+      playerCirclesHtml += `
+        <div class="player-circle ${isReady ? 'is-ready' : ''}" style="--player-color: ${playerColor}">
+          <span>P${i + 1}</span>
+          ${isReady ? '<span class="ready-dot"></span>' : ''}
         </div>
       `;
     }
 
     this.container.innerHTML = `
-      <div class="mario-select-screen" dir="rtl">
-        <div class="select-layout">
-          <div class="char-grid-panel">
-            <h2>اختر شخصيتك</h2>
-            <div class="char-grid-wrap">
-              ${charGridHtml}
+      <div class="selection-screen" dir="rtl">
+        <!-- Top Navigation Bar -->
+        <nav class="selection-nav">
+          <div class="nav-right">
+            <div class="brand-logo">
+              <span class="brand-icon dice-logo">🎲</span>
+              <span class="brand-name">لعبة المجلس</span>
             </div>
           </div>
-          <div class="preview-panel">
-            <canvas id="char-preview-canvas"></canvas>
-            <div id="preview-name" class="preview-name">مرر للمعاينة</div>
+          <div class="nav-center">
+            <div class="room-code">
+              <span class="room-label">رمز الغرفة</span>
+              <span class="room-id">MJ-${Math.random().toString(36).substring(2, 5).toUpperCase()}</span>
+            </div>
+          </div>
+          <div class="nav-left">
+            <button class="nav-btn leave-btn" id="back-btn">مغادرة</button>
+            <button class="nav-btn">
+              <span class="nav-icon">❓</span>
+              كيفية اللعب
+            </button>
+            <button class="nav-btn">
+              <span class="nav-icon">⚙️</span>
+              الإعدادات
+            </button>
+          </div>
+        </nav>
+
+        <!-- Main Content -->
+
+        <div class="selection-content">
+          <div class="selection-header">
+            <h1>اختر بطلك</h1>
+            <p>بانتظار جميع اللاعبين لتأكيد اختيار شخصياتهم</p>
+          </div>
+          <div class="player-cards-row">
+            ${cardsHtml}
           </div>
         </div>
-        <div class="selected-players-row">
-          ${selectedHtml}
-        </div>
-        <div class="start-game-row">
-          <button class="back-btn-small" id="back-btn">رجوع ←</button>
-          <button id="start-game-btn" class="start-btn" ${this.allPlayersSelected() ? '' : 'disabled'}>
-            ابدأ اللعبة!
-          </button>
-        </div>
+
+        <!-- Bottom Footer Bar -->
+        <footer class="selection-footer-bar">
+          <div class="footer-left">
+            <button class="start-btn ${allReady ? '' : 'disabled'}" id="start-btn" ${allReady ? '' : 'disabled'}>
+              ▶ ابدأ اللعبة
+            </button>
+          </div>
+          <div class="footer-center">
+            <div class="ready-status">
+              <span class="status-label">حالة الاستعداد</span>
+              <span class="status-count">${readyCount} / ${this.playerCount} جاهزون للبدء</span>
+            </div>
+          </div>
+          <div class="footer-right">
+            <div class="player-circles">
+              ${playerCirclesHtml}
+            </div>
+          </div>
+        </footer>
       </div>
     `;
 
-    // Initialize 3D preview
-    this.initPreviewEngine();
+    // Initialize 3D preview scenes for each player
+    this.initializePreviewScenes();
 
     // Event listeners
-    this.container.querySelectorAll('.char-select-item:not(.used)').forEach(item => {
-      item.addEventListener('mouseenter', (e) => {
-        const idx = parseInt((e.currentTarget as HTMLElement).dataset.idx || '0');
-        this.showPreview(idx);
+    this.container.querySelectorAll('.nav-arrow').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const el = e.currentTarget as HTMLElement;
+        const playerIdx = parseInt(el.dataset.player || '0');
+        const dir = parseInt(el.dataset.dir || '1');
+        this.cycleCharacter(playerIdx, dir);
       });
+    });
 
-      item.addEventListener('click', (e) => {
-        const idx = parseInt((e.currentTarget as HTMLElement).dataset.idx || '0');
-        this.selectCharacter(idx);
+    this.container.querySelectorAll('.ready-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const playerIdx = parseInt((e.currentTarget as HTMLElement).dataset.player || '0');
+        this.toggleReady(playerIdx);
       });
     });
 
@@ -185,216 +277,134 @@ export class SelectionScreen {
       this.renderModeSelection();
     });
 
-    document.getElementById('start-game-btn')?.addEventListener('click', () => {
-      if (this.allPlayersSelected()) {
+    document.getElementById('start-btn')?.addEventListener('click', () => {
+      // Check current ready state, not the captured one
+      const currentlyAllReady = this.readyStates.every(r => r);
+      if (currentlyAllReady) {
         this.startGame();
       }
     });
+  }
 
-    // Show first available character
-    const firstAvailable = AVAILABLE_CHARACTERS.findIndex((_, idx) => !this.selectedCharacters.includes(idx));
-    if (firstAvailable >= 0) {
-      this.showPreview(firstAvailable);
+  private initializePreviewScenes(): void {
+    for (let i = 0; i < this.playerCount; i++) {
+      const canvas = document.getElementById(`preview-canvas-${i}`) as HTMLCanvasElement | null;
+      if (canvas) {
+        const previewScene = new CharacterPreviewScene(canvas);
+        const char = AVAILABLE_CHARACTERS[this.characterIndices[i]];
+        previewScene.loadCharacter(char.file);
+        this.previewScenes.push(previewScene);
+      }
     }
   }
 
-  private initPreviewEngine(): void {
-    const canvas = document.getElementById('char-preview-canvas') as unknown as HTMLCanvasElement;
-    if (!canvas) return;
-
-    canvas.width = 300;
-    canvas.height = 350;
-
-    this.previewEngine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    this.previewScene = new Scene(this.previewEngine);
-    this.previewScene.clearColor = new Color4(0.08, 0.1, 0.15, 1);
-
-    this.previewCamera = new ArcRotateCamera('cam', Math.PI / 4, Math.PI / 2.5, 4, new Vector3(0, 0.8, 0), this.previewScene);
-
-    const light = new HemisphericLight('light', new Vector3(0.3, 1, 0.3), this.previewScene);
-    light.intensity = 1.5;
-
-    // Pre-load all character models (hidden initially)
-    AVAILABLE_CHARACTERS.forEach((char, idx) => {
-      this.loadCharacterModel(idx, char.file);
-    });
-
-    this.previewEngine.runRenderLoop(() => {
-      if (this.previewScene) {
-        // Rotate visible model
-        this.loadedModels.forEach((node, idx) => {
-          if (idx === this.currentPreviewIndex) {
-            node.rotation.y += 0.015;
-          }
-        });
-        this.previewScene.render();
-      }
-    });
+  private updatePreviewScene(playerIdx: number): void {
+    const previewScene = this.previewScenes[playerIdx];
+    if (previewScene) {
+      const char = AVAILABLE_CHARACTERS[this.characterIndices[playerIdx]];
+      previewScene.loadCharacter(char.file);
+    }
   }
 
-  private loadCharacterModel(index: number, filename: string): void {
-    if (!this.previewScene) return;
+  private cycleCharacter(playerIdx: number, direction: number): void {
+    // Don't allow changing if ready
+    if (this.readyStates[playerIdx]) return;
 
-    const parent = new TransformNode(`char_${index}`, this.previewScene);
-    parent.setEnabled(false); // Hidden initially
-    this.loadedModels.set(index, parent);
+    const currentIdx = this.characterIndices[playerIdx];
+    let newIdx = currentIdx + direction;
 
-    SceneLoader.ImportMesh('', '/character/', filename, this.previewScene, (meshes) => {
-      if (meshes.length === 0) {
-        // Create fallback
-        const fallback = MeshBuilder.CreateBox(`fallback_${index}`, { size: 1 }, this.previewScene!);
-        fallback.parent = parent;
-        const mat = new StandardMaterial(`mat_${index}`, this.previewScene!);
-        mat.diffuseColor = Color3.FromHexString(AVAILABLE_CHARACTERS[index].color);
-        fallback.material = mat;
+    // Wrap around
+    if (newIdx < 0) newIdx = AVAILABLE_CHARACTERS.length - 1;
+    if (newIdx >= AVAILABLE_CHARACTERS.length) newIdx = 0;
+
+    // Check if character is already taken by another player
+    const takenByOther = this.characterIndices.some((idx, pIdx) =>
+      pIdx !== playerIdx && idx === newIdx && this.readyStates[pIdx]
+    );
+
+    if (takenByOther) {
+      // Update index and skip to next available
+      this.characterIndices[playerIdx] = newIdx;
+      this.cycleCharacter(playerIdx, direction);
+      return;
+    }
+
+    this.characterIndices[playerIdx] = newIdx;
+    const char = AVAILABLE_CHARACTERS[newIdx];
+    this.players[playerIdx].characterModel = char.file;
+    this.players[playerIdx].characterName = char.name;
+    this.players[playerIdx].portrait = char.portrait;
+
+    // Update only the 3D preview and name, not the whole screen
+    this.updatePreviewScene(playerIdx);
+
+    // Update the name display
+    const card = this.container.querySelectorAll('.player-card')[playerIdx];
+    if (card) {
+      const cardName = card.querySelector('.card-name');
+      if (cardName) {
+        cardName.textContent = char.name;
+      }
+    }
+  }
+
+  private toggleReady(playerIdx: number): void {
+    // Check for duplicate character when trying to ready
+    if (!this.readyStates[playerIdx]) {
+      const myChar = this.characterIndices[playerIdx];
+      const duplicate = this.characterIndices.some((idx, pIdx) =>
+        pIdx !== playerIdx && idx === myChar && this.readyStates[pIdx]
+      );
+      if (duplicate) {
+        // Can't ready with same character as another ready player
+        alert('هذه الشخصية مختارة من لاعب آخر!');
         return;
       }
+    }
 
-      // SPECIAL CASE: Some models have complex hierarchies - only parent the root node
-      // to preserve the internal mesh relationships
-      const isAmyRose = filename === 'amy_rose.glb';
-      const isAmyW = filename === 'werehog_amy_rose.glb';
-      const needsSpecialHandling = isAmyRose || isAmyW;
+    this.readyStates[playerIdx] = !this.readyStates[playerIdx];
 
-      if (needsSpecialHandling && meshes.length > 0) {
-        // Create an intermediate node to handle rotations
-        const rotationNode = new TransformNode(`rotation_node_${index}`, this.previewScene!);
-        rotationNode.parent = parent;
-        rotationNode.rotation.y = Math.PI; // 180 degrees to face camera
-        // Amy W needs to be flipped right-side up
-        if (isAmyW) {
-          rotationNode.rotation.x = Math.PI; // Flip upside down
-        }
+    // Update the ready button and counter without full re-render
+    const readyBtn = this.container.querySelectorAll('.ready-btn')[playerIdx];
+    if (readyBtn) {
+      const isReady = this.readyStates[playerIdx];
+      readyBtn.className = `ready-btn ${isReady ? 'is-ready' : ''}`;
+      readyBtn.textContent = isReady ? '✓ جاهز' : 'غير جاهز';
+    }
 
-        // Find the root node and parent it to our rotation node
-        const rootNode = meshes.find(m => m.name.includes('__root__')) || meshes[0];
-        rootNode.parent = rotationNode;
-
-        // Fix materials on all meshes
-        meshes.forEach(mesh => {
-          if (mesh.material) {
-            mesh.material.alpha = 1.0;
-            if ('transparencyMode' in mesh.material) {
-              (mesh.material as any).transparencyMode = 0;
-            }
-            mesh.material.backFaceCulling = false;
-          }
-        });
-      } else {
-        // Normal handling: Parent all meshes directly
-        meshes.forEach(mesh => {
-          mesh.parent = parent;
-          if (mesh.material) {
-            mesh.material.alpha = 1.0;
-            if ('transparencyMode' in mesh.material) {
-              (mesh.material as any).transparencyMode = 0;
-            }
-            mesh.material.backFaceCulling = false;
-          }
-        });
+    // Update player circle in footer
+    const playerCircles = this.container.querySelectorAll('.player-circle');
+    // Circles are rendered in reverse order (P4, P3, P2, P1)
+    const circleIdx = this.playerCount - 1 - playerIdx;
+    const circle = playerCircles[circleIdx];
+    if (circle) {
+      const isReady = this.readyStates[playerIdx];
+      circle.className = `player-circle ${isReady ? 'is-ready' : ''}`;
+      // Update ready dot
+      const existingDot = circle.querySelector('.ready-dot');
+      if (isReady && !existingDot) {
+        const dot = document.createElement('span');
+        dot.className = 'ready-dot';
+        circle.appendChild(dot);
+      } else if (!isReady && existingDot) {
+        existingDot.remove();
       }
-
-      // STEP 2: Apply per-character rotation (skip for models with special handling - done above)
-      const charConfig = AVAILABLE_CHARACTERS[index];
-      if (!needsSpecialHandling) {
-        parent.rotation.x = charConfig.rotX;
-        parent.rotation.y = (charConfig as any).rotY || 0;
-      }
-
-      // STEP 3: Force world matrix update
-      parent.computeWorldMatrix(true);
-      meshes.forEach(mesh => {
-        mesh.computeWorldMatrix(true);
-        mesh.refreshBoundingInfo();
-      });
-
-      // STEP 4: Calculate world-space bounds for scaling
-      let minY = Infinity, maxY = -Infinity;
-      let minX = Infinity, maxX = -Infinity;
-      let minZ = Infinity, maxZ = -Infinity;
-
-      meshes.forEach(mesh => {
-        const bb = mesh.getBoundingInfo().boundingBox;
-        minY = Math.min(minY, bb.minimumWorld.y);
-        maxY = Math.max(maxY, bb.maximumWorld.y);
-        minX = Math.min(minX, bb.minimumWorld.x);
-        maxX = Math.max(maxX, bb.maximumWorld.x);
-        minZ = Math.min(minZ, bb.minimumWorld.z);
-        maxZ = Math.max(maxZ, bb.maximumWorld.z);
-      });
-
-      // STEP 5: Scale to target size
-      const height = maxY - minY;
-      const width = Math.max(maxX - minX, maxZ - minZ);
-      const maxDim = Math.max(height, width);
-      // Amy W model is very large, use smaller target size
-      const targetSize = isAmyW ? 0.1 : 2;
-      const scale = targetSize / Math.max(maxDim, 0.01);
-      parent.scaling = new Vector3(scale, scale, scale);
-
-      // STEP 6: Update matrices after scaling
-      parent.computeWorldMatrix(true);
-      meshes.forEach(mesh => {
-        mesh.computeWorldMatrix(true);
-        mesh.refreshBoundingInfo();
-      });
-
-      // STEP 7: Recalculate minY after scaling and position so feet are visible
-      let minY_final = Infinity;
-      meshes.forEach(mesh => {
-        const bb = mesh.getBoundingInfo().boundingBox;
-        minY_final = Math.min(minY_final, bb.minimumWorld.y);
-      });
-
-      parent.position.y = -minY_final + 0.3;
-    });
-
-  }
-
-  private showPreview(index: number): void {
-    if (this.currentPreviewIndex === index) return;
-
-    // Hide current
-    if (this.currentPreviewIndex >= 0) {
-      const current = this.loadedModels.get(this.currentPreviewIndex);
-      if (current) current.setEnabled(false);
     }
 
-    // Show new
-    const next = this.loadedModels.get(index);
-    if (next) {
-      next.setEnabled(true);
-      next.rotation.y = 0;
+    // Update ready counter (new footer structure)
+    const readyCount = this.readyStates.filter(r => r).length;
+    const statusCount = this.container.querySelector('.status-count');
+    if (statusCount) {
+      statusCount.textContent = `${readyCount} / ${this.playerCount} جاهزون للبدء`;
     }
 
-    this.currentPreviewIndex = index;
-
-    // Update name
-    const nameEl = document.getElementById('preview-name');
-    if (nameEl) {
-      nameEl.textContent = AVAILABLE_CHARACTERS[index].name;
+    // Update start button
+    const allReady = this.readyStates.every(r => r);
+    const startBtn = document.getElementById('start-btn');
+    if (startBtn) {
+      startBtn.className = `start-btn ${allReady ? '' : 'disabled'}`;
+      (startBtn as HTMLButtonElement).disabled = !allReady;
     }
-  }
-
-  private selectCharacter(charIndex: number): void {
-    if (this.selectedCharacters.includes(charIndex)) return;
-
-    this.selectedCharacters[this.currentPlayerSelecting] = charIndex;
-    const selectedChar = AVAILABLE_CHARACTERS[charIndex];
-    this.players[this.currentPlayerSelecting].characterModel = selectedChar.file;
-    this.players[this.currentPlayerSelecting].characterName = selectedChar.name;
-    this.players[this.currentPlayerSelecting].portrait = selectedChar.portrait;
-
-    this.currentPlayerSelecting++;
-    if (this.currentPlayerSelecting >= this.playerCount) {
-      this.currentPlayerSelecting = 0;
-    }
-
-    this.renderCharacterSelection();
-  }
-
-  private allPlayersSelected(): boolean {
-    return this.selectedCharacters.every(idx => idx >= 0);
   }
 
   private startGame(): void {

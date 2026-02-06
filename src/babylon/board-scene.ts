@@ -67,6 +67,13 @@ export class BoardScene {
   private diceGlow: Mesh | null = null;
   private diceResolve: (() => void) | null = null;
 
+  // Tile Editor system
+  private tileEditMode: boolean = false;
+  private selectedTileIndex: number = -1;
+  private tileEditorPanel: HTMLDivElement | null = null;
+  private isDraggingTile: boolean = false;
+  private dragPlane: Mesh | null = null;
+
   constructor(engine: Engine, onDiceRoll: () => void, onPawnMoveComplete: () => void) {
     this.engine = engine;
     this.onDiceRoll = onDiceRoll;
@@ -84,8 +91,8 @@ export class BoardScene {
 
     // FollowCamera for character following
     this.camera = new FollowCamera('camera', new Vector3(0, 5, -10), this.scene);
-    this.camera.radius = 10; // Distance from target
-    this.camera.heightOffset = 4; // Height above target
+    this.camera.radius = 18; // Distance from target (increased for wider view)
+    this.camera.heightOffset = 15; // Height above target (higher for isometric-like view)
     this.camera.rotationOffset = 180; // Follow from behind
     this.camera.cameraAcceleration = 0.05; // Smooth acceleration
     this.camera.maxCameraSpeed = 20; // Maximum speed
@@ -140,7 +147,7 @@ export class BoardScene {
       this.createViewMapButton();
 
       // Create camera preset buttons
-      this.createCameraPresetButtons();
+      // this.createCameraPresetButtons(); // Removed: integrated into Dev Tools
 
       // Setup input
       this.setupInput();
@@ -223,62 +230,71 @@ export class BoardScene {
   }
 
   /**
-   * Create 50 tiles arranged in a rectangular path around the map border
-   * Path goes: bottom (right) → right (up) → top (left) → left (down)
+   * Create 50 tiles along a custom path through the garden and mansion
    */
   private createTiles(): void {
     const tileSize = 0.9;
     const tileHeight = 0.15;
-    const totalTiles = 50;
     const tileY = 0.5; // Height above ground
 
-    // Map border coordinates (adjust these to match your map size)
-    const mapMinX = -45;  // Left edge
-    const mapMaxX = 45;   // Right edge
-    const mapMinZ = -45;  // Bottom edge (near start)
-    const mapMaxZ = 45;   // Top edge (far end)
+    // Custom tile path - positioned along garden walkways and through mansion
+    const customPath: { x: number, z: number }[] = [
+      { x: -45, z: -40 },
+      { x: -37.8, z: -40 },
+      { x: -30.6, z: -40 },
+      { x: -23.4, z: -40 },
+      { x: -16.2, z: -40 },
+      { x: -9, z: -40 },
+      { x: -1.8, z: -41 },
+      { x: 2.4, z: -46 },
+      { x: 5.6, z: -40 },
+      { x: 5.8, z: -35 },
+      { x: 6, z: -30 },
+      { x: 6.2, z: -25 },
+      { x: 4.4, z: -20 },
+      { x: 4, z: -6.4 },
+      { x: 0, z: -1.2 },
+      { x: 0, z: 6 },
+      { x: 0, z: 13.2 },
+      { x: 7, z: 13.4 },
+      { x: 7, z: 19.6 },
+      { x: 7, z: 26.8 },
+      { x: 7, z: 31 },
+      { x: 15, z: 30.2 },
+      { x: 15, z: 36.4 },
+      { x: 7, z: 35.6 },
+      { x: 0, z: 35.8 },
+      { x: 0, z: 29 },
+      { x: -5.2, z: 24 },
+      { x: -5.4, z: 17 },
+      { x: -11.6, z: 13 },
+      { x: -18.8, z: 13 },
+      { x: -26, z: 13 },
+      { x: -33.2, z: 13 },
+      { x: -38.4, z: 13 },
+      { x: -43.6, z: 13 },
+      { x: -47.8, z: 13 },
+      { x: -54, z: 11 },
+      { x: -54.2, z: 5 },
+      { x: -59.4, z: -1 },
+      { x: -66, z: -2.6 },
+      { x: -74, z: -2.8 },
+      { x: -74, z: -8 },
+      { x: -74, z: -13.2 },
+      { x: -74, z: -17.4 },
+      { x: -74, z: -22.6 },
+      { x: -67, z: -22.8 },
+      { x: -60, z: -25 },
+      { x: -60, z: -13.2 },
+      { x: -53, z: -13.4 },
+      { x: -46, z: -13.6 },
+      { x: -39, z: -13.8 },
+    ];
 
-    // Calculate perimeter length and tiles per side
-    const width = mapMaxX - mapMinX;
-    const height = mapMaxZ - mapMinZ;
-    const perimeter = 2 * width + 2 * height;
-    const tileSpacing = perimeter / totalTiles;
-
-    // Generate tile positions along the rectangular path
-    const positions: { x: number, z: number, side: string }[] = [];
-    let distanceTraveled = 0;
-
-    for (let i = 0; i < totalTiles; i++) {
-      const d = i * tileSpacing;
-      let x: number, z: number, side: string;
-
-      if (d < width) {
-        // Bottom side: going right (from left-bottom to right-bottom)
-        x = mapMinX + d;
-        z = mapMinZ;
-        side = 'bottom';
-      } else if (d < width + height) {
-        // Right side: going up (from right-bottom to right-top)
-        x = mapMaxX;
-        z = mapMinZ + (d - width);
-        side = 'right';
-      } else if (d < 2 * width + height) {
-        // Top side: going left (from right-top to left-top)
-        x = mapMaxX - (d - width - height);
-        z = mapMaxZ;
-        side = 'top';
-      } else {
-        // Left side: going down (from left-top to left-bottom)
-        x = mapMinX;
-        z = mapMaxZ - (d - 2 * width - height);
-        side = 'left';
-      }
-
-      positions.push({ x, z, side });
-    }
+    const positions = customPath;
 
     // Create tiles at calculated positions
-    for (let i = 0; i < totalTiles; i++) {
+    for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
 
       const tile = MeshBuilder.CreateBox(`tile_${i}`, {
@@ -300,6 +316,7 @@ export class BoardScene {
       material.specularColor = new Color3(0.15, 0.15, 0.15);
       material.roughness = 0.7;
       tile.material = material;
+      tile.isPickable = true; // Enable picking for tile editor
 
       const glowSize = tileSize * 1.15;
       const glow = MeshBuilder.CreateBox(`tile_glow_${i}`, {
@@ -442,7 +459,7 @@ export class BoardScene {
           // For now, snap, unless we want to interpolate.
           // But movePawn handles interpolation.
           // We should only snap if the distance is far (jump) or initialization.
-          pawn.position = tile.position.clone().add(new Vector3(offset.x, 0.5, offset.z));
+          pawn.position = tile.position.clone().add(new Vector3(offset.x, 0.65, offset.z));
 
           // Update rotation to face board center based on tile position
           pawn.rotation.y = this.getRotationForTile(player.pawnPosition);
@@ -666,7 +683,7 @@ export class BoardScene {
           resolve();
           return;
         }
-        const targetPos = nextTileMesh.position.clone().add(new Vector3(offset.x, 0.5, offset.z));
+        const targetPos = nextTileMesh.position.clone().add(new Vector3(offset.x, 0.65, offset.z));
         const startPos = pawn.position.clone();
 
         // Create animation for position
@@ -745,53 +762,83 @@ export class BoardScene {
     document.body.appendChild(button);
     this.mapViewButton = button;
 
-    // TEST BUTTON: Victory Animation
-    const testButton = document.createElement('button');
-    testButton.id = 'test-victory-btn';
-    testButton.textContent = '🏆 اختبار الفوز';
-    testButton.style.cssText = `
+    // Create Dev Tools Toggle Button (Icon)
+    this.createDevToolsButton();
+
+    // CAMERA ADJUSTMENT PANEL (Hidden by default)
+    this.createCameraAdjustmentPanel();
+  }
+
+  /**
+   * Create the floating Dev Tools icon button
+   */
+  private createDevToolsButton(): void {
+    const btn = document.createElement('button');
+    btn.textContent = '🛠️';
+    btn.title = 'Toggle Dev Tools';
+    btn.style.cssText = `
       position: fixed;
       bottom: 20px;
-      left: 20px;
-      padding: 12px 24px;
-      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      left: 20px; /* Moved to Left to avoid Roll Button */
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.8);
       color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: bold;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      font-size: 24px;
       cursor: pointer;
-      z-index: 1000;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      z-index: 2000;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
       transition: all 0.3s ease;
-      font-family: 'Cairo', Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     `;
 
-    testButton.onmouseenter = () => {
-      testButton.style.transform = 'translateY(-2px)';
-      testButton.style.boxShadow = '0 6px 16px rgba(0,0,0,0.3)';
+    btn.onmouseenter = () => {
+      btn.style.transform = 'scale(1.1) rotate(15deg)';
+      btn.style.background = 'rgba(0, 0, 0, 0.9)';
+      btn.style.boxShadow = '0 6px 15px rgba(0,0,0,0.5)';
+      btn.style.borderColor = '#4ade80';
     };
 
-    testButton.onmouseleave = () => {
-      testButton.style.transform = 'translateY(0)';
-      testButton.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+    btn.onmouseleave = () => {
+      btn.style.transform = 'scale(1) rotate(0deg)';
+      btn.style.background = 'rgba(0, 0, 0, 0.8)';
+      btn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.3)';
+      btn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
     };
 
-    testButton.onclick = () => {
-      // Get first player ID (usually 0)
-      const firstPlayerId = this.pawns.keys().next().value;
-      if (firstPlayerId !== undefined) {
-        console.log('Testing victory animation with player', firstPlayerId);
-        this.playVictoryAnimation(firstPlayerId);
-      } else {
-        console.warn('No players available for victory animation test');
-      }
+    btn.onclick = () => {
+      this.toggleDevTools();
     };
 
-    document.body.appendChild(testButton);
+    document.body.appendChild(btn);
+  }
 
-    // CAMERA ADJUSTMENT PANEL for testing different angles
-    this.createCameraAdjustmentPanel();
+  /**
+   * Toggle visibility of all dev tool panels
+   */
+  private toggleDevTools(): void {
+    const cameraPanel = document.getElementById('camera-adjust-panel');
+    const tileEditorPanel = document.getElementById('tile-editor-panel');
+
+    // Check if currently visible
+    const isVisible = cameraPanel ? cameraPanel.style.display !== 'none' : false;
+
+    // Toggle state
+    const newDisplay = isVisible ? 'none' : 'block';
+
+    if (cameraPanel) cameraPanel.style.display = newDisplay;
+
+    // For tile editor, we only show it if we are entering edit mode?
+    // Or we just show the panel container if it was active?
+    // Actually, let's toggle the camera panel visibility directly.
+    // The tile editor panel is managed by toggleTileEditMode().
+    // Let's add the Map View button and Test Victory button to the camera panel for centralization.
+
+    console.log(`Dev Tools toggled: ${isVisible ? 'OFF' : 'ON'}`);
   }
 
   /**
@@ -802,21 +849,88 @@ export class BoardScene {
     panel.id = 'camera-adjust-panel';
     panel.style.cssText = `
       position: fixed;
-      top: 280px;
-      right: 20px;
-      background: rgba(0,0,0,0.85);
+      top: 100px; /* Moved up slightly */
+      right: 80px; /* Positioned near the toggle button */
+      background: rgba(0,0,0,0.9);
       color: white;
       padding: 15px;
-      border-radius: 10px;
+      border-radius: 12px;
       z-index: 1000;
       font-family: 'Cairo', Arial, sans-serif;
-      min-width: 200px;
+      min-width: 240px;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      display: none; /* Hidden by default */
+      max-height: 80vh;
+      overflow-y: auto;
     `;
 
     const title = document.createElement('div');
-    title.textContent = '📷 Camera Settings';
-    title.style.cssText = 'font-weight: bold; margin-bottom: 10px; font-size: 14px;';
+    title.textContent = '🛠️ Developer Tools';
+    title.style.cssText = 'font-weight: bold; margin-bottom: 15px; font-size: 16px; border-bottom: 1px solid #444; padding-bottom: 10px; color: #4ade80;';
     panel.appendChild(title);
+
+    // --- General Debug Section ---
+    const debugSection = document.createElement('div');
+    debugSection.style.cssText = 'margin-bottom: 15px;';
+
+    // Map View Button
+    const mapBtn = document.createElement('button');
+    mapBtn.textContent = '🗺️ Toggle Map View';
+    mapBtn.style.cssText = 'width: 100%; margin-bottom: 8px; padding: 8px; background: #34495e; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left;';
+    mapBtn.onclick = () => this.toggleMapView();
+    debugSection.appendChild(mapBtn);
+    this.mapViewButton = mapBtn; // Store reference
+
+    // Victory Test Button
+    const victoryBtn = document.createElement('button');
+    victoryBtn.textContent = '🏆 Test Victory Anim';
+    victoryBtn.style.cssText = 'width: 100%; margin-bottom: 8px; padding: 8px; background: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left;';
+    victoryBtn.onclick = () => {
+      const firstPlayerId = this.pawns.keys().next().value;
+      if (firstPlayerId !== undefined) {
+        console.log('Testing victory animation with player', firstPlayerId);
+        this.playVictoryAnimation(firstPlayerId);
+      }
+    };
+    debugSection.appendChild(victoryBtn);
+
+    // Test Blue Tile Button
+    const blueTileBtn = document.createElement('button');
+    blueTileBtn.textContent = '🔵 Test Blue Tile (Minigame)';
+    blueTileBtn.style.cssText = 'width: 100%; margin-bottom: 8px; padding: 8px; background: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left;';
+    blueTileBtn.onclick = () => {
+      console.log('Testing Blue Tile minigame');
+      // Dispatch custom event for main.ts to handle
+      window.dispatchEvent(new CustomEvent('testBlueTile'));
+    };
+    debugSection.appendChild(blueTileBtn);
+
+    panel.appendChild(debugSection);
+
+    const cameraTitle = document.createElement('div');
+    cameraTitle.textContent = '📷 Camera Settings';
+    cameraTitle.style.cssText = 'font-weight: bold; margin: 10px 0 5px 0; font-size: 12px; color: #bdc3c7;';
+    panel.appendChild(cameraTitle);
+
+    // Camera Presets
+    const presetsRow = document.createElement('div');
+    presetsRow.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px;';
+
+    const presets = [
+      { label: 'Start', pos: 'start' },
+      { label: 'Mid', pos: 'middle' },
+      { label: 'End', pos: 'end' }
+    ];
+
+    presets.forEach(p => {
+      const btn = document.createElement('button');
+      btn.textContent = p.label;
+      btn.style.cssText = 'flex: 1; padding: 4px; background: #2c3e50; color: #ecf0f1; border: 1px solid #34495e; border-radius: 4px; cursor: pointer; font-size: 11px;';
+      btn.onclick = () => this.jumpToPreset(p.pos as any);
+      presetsRow.appendChild(btn);
+    });
+    panel.appendChild(presetsRow);
 
     // Helper to create adjustment row
     const createRow = (label: string, getValue: () => number, onChange: (delta: number) => void) => {
@@ -828,12 +942,12 @@ export class BoardScene {
       labelEl.style.cssText = 'flex: 1; font-size: 12px;';
 
       const valueEl = document.createElement('span');
-      valueEl.style.cssText = 'width: 50px; text-align: center; font-weight: bold;';
+      valueEl.style.cssText = 'width: 40px; text-align: center; font-weight: bold; font-family: monospace;';
       valueEl.textContent = getValue().toFixed(1);
 
       const minusBtn = document.createElement('button');
       minusBtn.textContent = '-';
-      minusBtn.style.cssText = 'width: 30px; height: 30px; border: none; border-radius: 5px; background: #e74c3c; color: white; cursor: pointer; font-size: 16px;';
+      minusBtn.style.cssText = 'width: 24px; height: 24px; border: none; border-radius: 4px; background: #e74c3c; color: white; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;';
       minusBtn.onclick = () => {
         onChange(-2);
         valueEl.textContent = getValue().toFixed(1);
@@ -841,7 +955,7 @@ export class BoardScene {
 
       const plusBtn = document.createElement('button');
       plusBtn.textContent = '+';
-      plusBtn.style.cssText = 'width: 30px; height: 30px; border: none; border-radius: 5px; background: #2ecc71; color: white; cursor: pointer; font-size: 16px;';
+      plusBtn.style.cssText = 'width: 24px; height: 24px; border: none; border-radius: 4px; background: #2ecc71; color: white; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;';
       plusBtn.onclick = () => {
         onChange(2);
         valueEl.textContent = getValue().toFixed(1);
@@ -874,14 +988,14 @@ export class BoardScene {
 
     // Print current values button
     const printBtn = document.createElement('button');
-    printBtn.textContent = '📋 Copy Values';
-    printBtn.style.cssText = 'width: 100%; margin-top: 10px; padding: 8px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;';
+    printBtn.textContent = '📋 Copy Camera Values';
+    printBtn.style.cssText = 'width: 100%; margin-top: 5px; padding: 6px; background: #2980b9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 11px;';
     printBtn.onclick = () => {
       const values = `radius: ${this.camera.radius.toFixed(1)}, heightOffset: ${this.camera.heightOffset.toFixed(1)}, rotationOffset: ${this.camera.rotationOffset.toFixed(1)}`;
       console.log('Camera Settings:', values);
       navigator.clipboard.writeText(values).then(() => {
         printBtn.textContent = '✅ Copied!';
-        setTimeout(() => printBtn.textContent = '📋 Copy Values', 2000);
+        setTimeout(() => printBtn.textContent = '📋 Copy Camera Values', 2000);
       });
     };
     panel.appendChild(printBtn);
@@ -892,7 +1006,7 @@ export class BoardScene {
 
     const diceTitle = document.createElement('div');
     diceTitle.textContent = '🎲 Test Dice Face';
-    diceTitle.style.cssText = 'font-weight: bold; margin-bottom: 8px; font-size: 12px;';
+    diceTitle.style.cssText = 'font-weight: bold; margin-bottom: 8px; font-size: 12px; color: #bdc3c7;';
     diceSection.appendChild(diceTitle);
 
     const diceButtonsRow = document.createElement('div');
@@ -901,9 +1015,9 @@ export class BoardScene {
     for (let i = 1; i <= 6; i++) {
       const btn = document.createElement('button');
       btn.textContent = String(i);
-      btn.style.cssText = 'width: 32px; height: 32px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;';
-      btn.onmouseenter = () => btn.style.background = '#c0392b';
-      btn.onmouseleave = () => btn.style.background = '#e74c3c';
+      btn.style.cssText = 'width: 32px; height: 32px; background: #c0392b; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;';
+      btn.onmouseenter = () => btn.style.background = '#e74c3c';
+      btn.onmouseleave = () => btn.style.background = '#c0392b';
       btn.onclick = () => {
         console.log(`Testing dice face: ${i}`);
         this.testDiceFace(i);
@@ -913,6 +1027,20 @@ export class BoardScene {
 
     diceSection.appendChild(diceButtonsRow);
     panel.appendChild(diceSection);
+
+    // Tile Editor section
+    const tileEditorSection = document.createElement('div');
+    tileEditorSection.style.cssText = 'margin-top: 15px; border-top: 1px solid #555; padding-top: 10px;';
+
+    const editTilesBtn = document.createElement('button');
+    editTilesBtn.textContent = '🎯 Edit Tiles';
+    editTilesBtn.style.cssText = 'width: 100%; padding: 10px; background: #d35400; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;';
+    editTilesBtn.onmouseenter = () => editTilesBtn.style.background = '#e67e22';
+    editTilesBtn.onmouseleave = () => editTilesBtn.style.background = '#d35400';
+    editTilesBtn.onclick = () => this.toggleTileEditMode();
+    tileEditorSection.appendChild(editTilesBtn);
+
+    panel.appendChild(tileEditorSection);
 
     document.body.appendChild(panel);
   }
@@ -942,6 +1070,454 @@ export class BoardScene {
     this.diceSpinning = false;
 
     console.log(`Dice set to face ${faceNumber} with rotation: (${targetRotation.x.toFixed(2)}, ${targetRotation.y.toFixed(2)}, ${targetRotation.z.toFixed(2)})`);
+  }
+
+  // ==================== TILE EDITOR SYSTEM ====================
+
+  /**
+   * Create the tile editor panel UI
+   */
+  private createTileEditorPanel(): void {
+    this.tileEditorPanel = document.createElement('div');
+    this.tileEditorPanel.id = 'tile-editor-panel';
+    this.tileEditorPanel.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.9);
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      z-index: 1000;
+      font-family: 'Cairo', Arial, sans-serif;
+      min-width: 280px;
+      display: none;
+    `;
+
+    const title = document.createElement('div');
+    title.textContent = '🎯 Tile Editor';
+    title.style.cssText = 'font-weight: bold; margin-bottom: 10px; font-size: 16px; color: #f1c40f;';
+    this.tileEditorPanel.appendChild(title);
+
+    const instructions = document.createElement('div');
+    instructions.innerHTML = `
+      <div style="font-size: 11px; margin-bottom: 8px; color: #bdc3c7;">
+        Arrow keys to move selected tile<br>
+        Hold Shift for larger moves
+      </div>
+    `;
+    this.tileEditorPanel.appendChild(instructions);
+
+    // Tile selector section
+    const selectorSection = document.createElement('div');
+    selectorSection.style.cssText = 'margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;';
+
+    const selectorLabel = document.createElement('div');
+    selectorLabel.textContent = 'Select Tile:';
+    selectorLabel.style.cssText = 'font-size: 12px; margin-bottom: 8px; color: #f1c40f;';
+    selectorSection.appendChild(selectorLabel);
+
+    const selectorRow = document.createElement('div');
+    selectorRow.style.cssText = 'display: flex; align-items: center; gap: 5px;';
+
+    // Prev button
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = '◀';
+    prevBtn.style.cssText = 'width: 36px; height: 36px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;';
+    prevBtn.onclick = () => {
+      const newIndex = Math.max(0, this.selectedTileIndex - 1);
+      this.selectTile(newIndex);
+      (document.getElementById('tile-number-input') as HTMLInputElement).value = String(newIndex);
+    };
+    selectorRow.appendChild(prevBtn);
+
+    // Number input
+    const numInput = document.createElement('input');
+    numInput.type = 'number';
+    numInput.id = 'tile-number-input';
+    numInput.min = '0';
+    numInput.max = '49';
+    numInput.value = '0';
+    numInput.style.cssText = 'width: 60px; height: 30px; text-align: center; background: #2c3e50; color: white; border: 1px solid #3498db; border-radius: 5px; font-size: 14px;';
+    numInput.onchange = () => {
+      const index = Math.min(49, Math.max(0, parseInt(numInput.value) || 0));
+      numInput.value = String(index);
+      this.selectTile(index);
+    };
+    selectorRow.appendChild(numInput);
+
+    // Next button
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = '▶';
+    nextBtn.style.cssText = 'width: 36px; height: 36px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;';
+    nextBtn.onclick = () => {
+      const newIndex = Math.min(49, this.selectedTileIndex + 1);
+      this.selectTile(newIndex);
+      (document.getElementById('tile-number-input') as HTMLInputElement).value = String(newIndex);
+    };
+    selectorRow.appendChild(nextBtn);
+
+    // Go to tile button
+    const goBtn = document.createElement('button');
+    goBtn.textContent = 'Go';
+    goBtn.style.cssText = 'flex: 1; height: 36px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;';
+    goBtn.onclick = () => {
+      const index = parseInt((document.getElementById('tile-number-input') as HTMLInputElement).value) || 0;
+      this.selectTile(index);
+      this.centerCameraOnTile(index);
+    };
+    selectorRow.appendChild(goBtn);
+
+    selectorSection.appendChild(selectorRow);
+    this.tileEditorPanel.appendChild(selectorSection);
+
+    // Selected tile info
+    const tileInfo = document.createElement('div');
+    tileInfo.id = 'tile-info';
+    tileInfo.style.cssText = 'margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; font-size: 12px;';
+    tileInfo.textContent = 'No tile selected';
+    this.tileEditorPanel.appendChild(tileInfo);
+
+    // Movement controls section
+    const moveSection = document.createElement('div');
+    moveSection.style.cssText = 'margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;';
+
+    const moveLabel = document.createElement('div');
+    moveLabel.textContent = 'Move Tile:';
+    moveLabel.style.cssText = 'font-size: 12px; margin-bottom: 8px; color: #f1c40f;';
+    moveSection.appendChild(moveLabel);
+
+    // Direction buttons grid
+    const moveGrid = document.createElement('div');
+    moveGrid.style.cssText = 'display: grid; grid-template-columns: 40px 40px 40px 40px; grid-gap: 4px; justify-content: center;';
+
+    const createMoveBtn = (text: string, dx: number, dz: number) => {
+      const btn = document.createElement('button');
+      btn.textContent = text;
+      btn.style.cssText = 'width: 40px; height: 32px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;';
+      btn.onclick = () => this.moveTile(dx, dz);
+      return btn;
+    };
+
+    // Row 1: empty, up, empty, big up
+    moveGrid.appendChild(document.createElement('span'));
+    moveGrid.appendChild(createMoveBtn('↑', 0, 1));
+    moveGrid.appendChild(document.createElement('span'));
+    moveGrid.appendChild(createMoveBtn('⇑', 0, 5));
+
+    // Row 2: left, empty, right, big right
+    moveGrid.appendChild(createMoveBtn('←', -1, 0));
+    moveGrid.appendChild(document.createElement('span'));
+    moveGrid.appendChild(createMoveBtn('→', 1, 0));
+    moveGrid.appendChild(createMoveBtn('⇒', 5, 0));
+
+    // Row 3: empty, down, empty, big down
+    moveGrid.appendChild(createMoveBtn('⇐', -5, 0));
+    moveGrid.appendChild(createMoveBtn('↓', 0, -1));
+    moveGrid.appendChild(document.createElement('span'));
+    moveGrid.appendChild(createMoveBtn('⇓', 0, -5));
+
+    moveSection.appendChild(moveGrid);
+    this.tileEditorPanel.appendChild(moveSection);
+
+    // Export button
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = '📋 Export Path to Clipboard';
+    exportBtn.style.cssText = 'width: 100%; margin-top: 10px; padding: 10px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;';
+    exportBtn.onclick = () => this.exportTilePath();
+    this.tileEditorPanel.appendChild(exportBtn);
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '❌ Exit Edit Mode';
+    closeBtn.style.cssText = 'width: 100%; margin-top: 8px; padding: 10px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;';
+    closeBtn.onclick = () => this.toggleTileEditMode();
+    this.tileEditorPanel.appendChild(closeBtn);
+
+    document.body.appendChild(this.tileEditorPanel);
+  }
+
+  /**
+   * Toggle tile edit mode on/off
+   */
+  public toggleTileEditMode(): void {
+    this.tileEditMode = !this.tileEditMode;
+
+    if (!this.tileEditorPanel) {
+      this.createTileEditorPanel();
+    }
+
+    if (this.tileEditMode) {
+      this.tileEditorPanel!.style.display = 'block';
+      this.setupTileEditorControls();
+      this.highlightAllTiles(true);
+      console.log('Tile Edit Mode: ON');
+
+      if (!this.isMapView) {
+        this.switchToMapView();
+      }
+    } else {
+      this.tileEditorPanel!.style.display = 'none';
+      this.deselectTile();
+      this.highlightAllTiles(false);
+      console.log('Tile Edit Mode: OFF');
+    }
+  }
+
+  /**
+   * Highlight all tiles to make them easier to see and click
+   */
+  private highlightAllTiles(highlight: boolean): void {
+    this.tiles.forEach((tile) => {
+      if (tile.material) {
+        if (highlight) {
+          tile.material.emissiveColor = new Color3(0.2, 0.2, 0.2);
+          tile.material.alpha = 0.9;
+        } else {
+          tile.material.emissiveColor = new Color3(0, 0, 0);
+          tile.material.alpha = 1;
+        }
+      }
+    });
+  }
+
+  /**
+   * Setup mouse and keyboard controls for tile editing
+   */
+  private setupTileEditorControls(): void {
+    if (!this.dragPlane) {
+      this.dragPlane = MeshBuilder.CreateGround('dragPlane', { width: 200, height: 200 }, this.scene);
+      this.dragPlane.position.y = 0.5;
+      this.dragPlane.isVisible = false;
+      this.dragPlane.isPickable = false; // Don't interfere with tile picking
+    }
+
+    // Use canvas pointer events for reliable detection
+    const canvas = this.engine.getRenderingCanvas();
+    if (!canvas) return;
+
+    canvas.addEventListener('pointerdown', (evt) => {
+      if (!this.tileEditMode) return;
+
+      console.log(`Pointer down at: ${evt.offsetX}, ${evt.offsetY}`);
+
+      // First, let's see what's under the cursor without filtering
+      const debugPick = this.scene.pick(evt.offsetX, evt.offsetY);
+      if (debugPick?.hit) {
+        console.log(`DEBUG: Hit mesh: "${debugPick.pickedMesh?.name}"`);
+      } else {
+        console.log('DEBUG: No hit at all');
+      }
+
+      // Now try to pick tiles specifically
+      const pickResult = this.scene.pick(evt.offsetX, evt.offsetY, (mesh) => {
+        const isTile = mesh.name.startsWith('tile_') && !mesh.name.includes('glow');
+        if (isTile) console.log(`  Checking mesh: ${mesh.name} - is tile: ${isTile}`);
+        return isTile;
+      });
+
+      if (pickResult?.hit && pickResult.pickedMesh) {
+        const meshName = pickResult.pickedMesh.name;
+        const tileIndex = parseInt(meshName.split('_')[1]);
+        console.log(`Clicked on tile ${tileIndex}`);
+        this.selectTile(tileIndex);
+        this.isDraggingTile = true;
+      } else {
+        console.log('No tile found under cursor - tiles may be blocked by other meshes');
+      }
+    });
+
+    canvas.addEventListener('pointermove', (evt) => {
+      if (!this.tileEditMode || !this.isDraggingTile || this.selectedTileIndex < 0) return;
+
+      // Pick against ground plane for smooth dragging
+      const pickResult = this.scene.pick(evt.offsetX, evt.offsetY, (mesh) => {
+        return mesh.name === 'dragPlane' || mesh.name.startsWith('ground') || mesh.name.includes('Ground');
+      });
+
+      // Fallback: use a simple ray to plane intersection
+      const ray = this.scene.createPickingRay(evt.offsetX, evt.offsetY, null, this.camera);
+      const planeY = 0.5;
+      const t = (planeY - ray.origin.y) / ray.direction.y;
+
+      if (t > 0) {
+        const hitX = ray.origin.x + ray.direction.x * t;
+        const hitZ = ray.origin.z + ray.direction.z * t;
+
+        const tile = this.tiles[this.selectedTileIndex];
+        const glow = this.tileGlows[this.selectedTileIndex];
+
+        tile.position.x = hitX;
+        tile.position.z = hitZ;
+
+        if (glow) {
+          glow.position.x = hitX;
+          glow.position.z = hitZ;
+        }
+
+        this.updateTileInfo();
+      }
+    });
+
+    canvas.addEventListener('pointerup', () => {
+      this.isDraggingTile = false;
+    });
+
+    window.addEventListener('keydown', (e) => this.handleTileEditorKeydown(e));
+  }
+
+  private handleTileEditorKeydown(e: KeyboardEvent): void {
+    if (!this.tileEditMode || this.selectedTileIndex < 0) return;
+
+    const moveAmount = e.shiftKey ? 1 : 0.5;
+    const tile = this.tiles[this.selectedTileIndex];
+    const glow = this.tileGlows[this.selectedTileIndex];
+
+    switch (e.key) {
+      case 'ArrowUp':
+        tile.position.z += moveAmount;
+        if (glow) glow.position.z += moveAmount;
+        e.preventDefault();
+        break;
+      case 'ArrowDown':
+        tile.position.z -= moveAmount;
+        if (glow) glow.position.z -= moveAmount;
+        e.preventDefault();
+        break;
+      case 'ArrowLeft':
+        tile.position.x -= moveAmount;
+        if (glow) glow.position.x -= moveAmount;
+        e.preventDefault();
+        break;
+      case 'ArrowRight':
+        tile.position.x += moveAmount;
+        if (glow) glow.position.x += moveAmount;
+        e.preventDefault();
+        break;
+      case 'Escape':
+        this.deselectTile();
+        break;
+    }
+
+    this.updateTileInfo();
+  }
+
+  private selectTile(index: number): void {
+    if (this.selectedTileIndex >= 0) {
+      const prevTile = this.tiles[this.selectedTileIndex];
+      if (prevTile?.material) {
+        prevTile.material.emissiveColor = new Color3(0.2, 0.2, 0.2);
+      }
+    }
+
+    this.selectedTileIndex = index;
+    const tile = this.tiles[index];
+
+    if (tile?.material) {
+      tile.material.emissiveColor = new Color3(0.5, 1, 0.5);
+    }
+
+    this.updateTileInfo();
+    console.log(`Selected tile ${index}`);
+  }
+
+  /**
+   * Center camera view on a specific tile
+   */
+  private centerCameraOnTile(index: number): void {
+    if (index < 0 || index >= this.tiles.length) return;
+    const tile = this.tiles[index];
+    if (tile) {
+      // For map view, just log the position - camera is already overhead
+      console.log(`Tile ${index} is at position: X=${tile.position.x.toFixed(2)}, Z=${tile.position.z.toFixed(2)}`);
+    }
+  }
+
+  /**
+   * Move the selected tile by delta X and Z
+   */
+  private moveTile(dx: number, dz: number): void {
+    if (this.selectedTileIndex < 0 || this.selectedTileIndex >= this.tiles.length) {
+      console.log('No tile selected to move');
+      return;
+    }
+
+    const tile = this.tiles[this.selectedTileIndex];
+    const glow = this.tileGlows[this.selectedTileIndex];
+
+    tile.position.x += dx;
+    tile.position.z += dz;
+
+    if (glow) {
+      glow.position.x += dx;
+      glow.position.z += dz;
+    }
+
+    this.updateTileInfo();
+    console.log(`Moved tile ${this.selectedTileIndex} to X=${tile.position.x.toFixed(2)}, Z=${tile.position.z.toFixed(2)}`);
+  }
+
+  private deselectTile(): void {
+    if (this.selectedTileIndex >= 0) {
+      const tile = this.tiles[this.selectedTileIndex];
+      if (tile?.material) {
+        tile.material.emissiveColor = new Color3(0.2, 0.2, 0.2);
+      }
+    }
+    this.selectedTileIndex = -1;
+    this.updateTileInfo();
+  }
+
+  private updateTileInfo(): void {
+    const infoEl = document.getElementById('tile-info');
+    if (!infoEl) return;
+
+    if (this.selectedTileIndex < 0) {
+      infoEl.textContent = 'No tile selected';
+    } else {
+      const tile = this.tiles[this.selectedTileIndex];
+      infoEl.innerHTML = `
+        <strong>Tile ${this.selectedTileIndex}</strong><br>
+        X: ${tile.position.x.toFixed(2)}<br>
+        Z: ${tile.position.z.toFixed(2)}
+      `;
+    }
+  }
+
+  private exportTilePath(): void {
+    const path = this.tiles.map((tile, i) => ({
+      index: i,
+      x: parseFloat(tile.position.x.toFixed(2)),
+      z: parseFloat(tile.position.z.toFixed(2))
+    }));
+
+    const json = JSON.stringify(path, null, 2);
+
+    // Also create TypeScript array format for direct code paste
+    const tsCode = `// Custom tile path - paste into createTiles()
+const customPath: { x: number, z: number }[] = [
+${path.map(p => `  { x: ${p.x}, z: ${p.z} },`).join('\n')}
+];`;
+
+    navigator.clipboard.writeText(tsCode).then(() => {
+      console.log('=== TILE PATH EXPORTED ===');
+      console.log('TypeScript format (copied to clipboard):');
+      console.log(tsCode);
+      console.log('\nJSON format:');
+      console.log(json);
+      console.log('=== END EXPORT ===');
+
+      const exportBtn = this.tileEditorPanel?.querySelector('button');
+      if (exportBtn) {
+        const originalText = exportBtn.textContent;
+        exportBtn.textContent = '✅ Copied! Check Console';
+        exportBtn.style.background = '#2ecc71';
+        setTimeout(() => {
+          exportBtn.textContent = originalText;
+          exportBtn.style.background = '#27ae60';
+        }, 3000);
+      }
+    });
   }
 
   /**

@@ -45,6 +45,15 @@ export class TurnMachine {
   }
 
   /**
+   * Force state for testing purposes (DEV ONLY)
+   */
+  forceStateForTesting(newState: TurnState): void {
+    console.log(`[DEBUG] Forcing state to: ${newState}`);
+    this.state = newState;
+    this.gameState.currentState = newState;
+  }
+
+  /**
    * Get current player
    */
   getCurrentPlayer() {

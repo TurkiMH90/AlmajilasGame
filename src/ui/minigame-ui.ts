@@ -99,7 +99,7 @@ export class MinigameUI {
 
     // Check if correct and end game
     const correct = index === this.currentQuestion!.correctAnswer;
-    
+
     // Show result
     buttons.forEach((btn, i) => {
       if (i === this.currentQuestion!.correctAnswer) {
@@ -119,6 +119,12 @@ export class MinigameUI {
    * Start the minigame with a random trivia question
    */
   start(): void {
+    // Clear any stale timer from previous game
+    if (this.timerInterval !== null) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+
     this.container.style.display = 'flex';
     this.selectedAnswer = null;
     this.startTime = Date.now();
@@ -150,7 +156,7 @@ export class MinigameUI {
       }
 
       timeRemaining = TRIVIA_TIME_PER_QUESTION - (Date.now() - this.startTime);
-      
+
       if (timeRemaining <= 0) {
         // Time's up - wrong answer
         this.end(false);
@@ -174,7 +180,7 @@ export class MinigameUI {
     if (!this.isActive) return;
 
     this.isActive = false;
-    
+
     if (this.timerInterval !== null) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;

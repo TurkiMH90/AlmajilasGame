@@ -53,9 +53,24 @@ class Game {
     // Initialize board
     this.initializeBoard();
 
+    // Listen for test events from Dev Tools
+    window.addEventListener('testBlueTile', () => {
+      this.testBlueTileMinigame();
+    });
+
     // Start first turn
     this.turnMachine.startTurn();
     this.updateUI();
+  }
+
+  /**
+   * Test blue tile minigame directly (for debugging)
+   */
+  private testBlueTileMinigame(): void {
+    console.log('Testing Blue Tile - Starting minigame in test mode');
+    // Force state to OPTIONAL_MINIGAME using TurnMachine's method
+    this.turnMachine.forceStateForTesting('OPTIONAL_MINIGAME');
+    this.handleStartMinigame();
   }
 
   /**
@@ -249,6 +264,10 @@ class Game {
 
       // Now resolve the tile
       this.turnMachine.resolveTile();
+
+      // Wait 2 seconds so player can see where they landed before showing tile notification
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
       this.handleTileResolved();
     } catch (error) {
       console.error('Error moving pawn:', error);
@@ -289,18 +308,8 @@ class Game {
     // If not minigame, end turn automatically after message
     if (currentTile && currentTile.type !== TileType.BLUE) {
       setTimeout(() => {
-        // Check if this is the last player in the round before ending turn
-        const isLastPlayerInRound = gameState.currentPlayerIndex === gameState.players.length - 1;
-
         this.turnMachine.endTurn();
         this.updateUI();
-
-        // If round just ended, trigger mini-game
-        if (isLastPlayerInRound) {
-          setTimeout(() => {
-            this.handleStartMinigame();
-          }, 500);
-        }
       }, 4000); // Wait for message to display
     }
   }
@@ -324,10 +333,16 @@ class Game {
     try {
       this.turnMachine.completeMinigame(correct);
 
-      // Show points earned
+      // Show points earned (or lost)
       const gameState = this.turnMachine.getGameState();
       const points = gameState.pendingPoints ?? 0;
-      this.hud.showTileMessage('blue', points);
+
+      // Show appropriate message based on correct/wrong answer
+      if (correct) {
+        this.hud.showTileMessage('minigame_win', points);
+      } else {
+        this.hud.showTileMessage('minigame_lose', 0);
+      }
 
       // Switch back to board scene BEFORE hiding minigame UI
       // This ensures the board scene is ready to render
