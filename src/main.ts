@@ -6,7 +6,7 @@ import { HUD } from './ui/hud';
 import { MinigameUI } from './ui/minigame-ui';
 import { EndScreen } from './ui/end-screen';
 import { TileType } from './core/constants';
-
+import { showTriviaOverlay, showTriviaByType } from './ui/trivia-overlay';
 
 import { SelectionScreen, GameConfig } from './ui/selection-screen';
 import { Player } from './core/game-state';
@@ -99,9 +99,40 @@ class Game {
     app.appendChild(endScreenContainer);
 
     // Create UI components
-    this.hud = new HUD(hudContainer, () => this.handleRollDice());
+    this.hud = new HUD(
+      hudContainer,
+      () => this.handleRollDice(),
+      () => this.handleTestTrivia()
+    );
     this.minigameUI = new MinigameUI(minigameContainer, (correct) => this.handleMinigameComplete(correct), this.gameState.rng);
     this.endScreen = new EndScreen(endScreenContainer, () => this.handleRestart());
+  }
+
+  /**
+   * Handle test trivia button click - cycles through text, audio, video
+   */
+  private testQuestionTypeIndex = 0;
+  private questionTypes: ('text' | 'audio' | 'video')[] = ['text', 'audio', 'video'];
+
+  private handleTestTrivia(): void {
+    const questionType = this.questionTypes[this.testQuestionTypeIndex];
+    this.testQuestionTypeIndex = (this.testQuestionTypeIndex + 1) % this.questionTypes.length;
+
+    console.log(`[Game] Testing ${questionType} trivia from Supabase`);
+
+    showTriviaByType(questionType, (result) => {
+      console.log('[Game] Trivia result:', result);
+      if (result.success) {
+        const currentPlayer = this.gameState.players[this.gameState.currentPlayerIndex];
+        if (currentPlayer) {
+          currentPlayer.points += result.pointsEarned;
+          this.hud.showTileMessage('minigame_win', result.pointsEarned);
+        }
+      } else {
+        this.hud.showTileMessage('minigame_lose', 0);
+      }
+      this.updateUI();
+    });
   }
 
   /**

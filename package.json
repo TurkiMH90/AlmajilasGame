@@ -10,7 +10,8 @@
   "dependencies": {
     "@babylonjs/core": "^6.32.0",
     "@babylonjs/loaders": "^6.32.0",
-    "@babylonjs/materials": "^6.32.0"
+    "@babylonjs/materials": "^6.32.0",
+    "@supabase/supabase-js": "^2.95.3"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

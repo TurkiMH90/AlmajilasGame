@@ -42,6 +42,8 @@ export class BoardScene {
   private shadowGenerator: ShadowGenerator | null = null;
   private mainLight: DirectionalLight | null = null;
   private idleAnimations: Map<number, Animatable | null> = new Map();
+  private pawnAnimationGroups: Map<number, any[]> = new Map(); // Store animation groups per player
+  private pawnYOffsets: Map<number, number> = new Map(); // Store Y offset per player for proper positioning
 
   private onDiceRoll: () => void;
   private onPawnMoveComplete: () => void;
@@ -52,6 +54,7 @@ export class BoardScene {
   private mapViewButton: HTMLButtonElement | null = null; // View map button reference
   private savedCameraTarget: any = null; // Store camera target when switching to map view
   private presetButtons: HTMLButtonElement[] = []; // Camera preset buttons
+  private isMoving: boolean = false; // Track if pawn is currently moving
 
   // Arabian theme decorations
   private palmTrees: any[] = [];
@@ -91,9 +94,14 @@ export class BoardScene {
 
     // FollowCamera for character following
     this.camera = new FollowCamera('camera', new Vector3(0, 5, -10), this.scene);
-    this.camera.radius = 18; // Distance from target (increased for wider view)
-    this.camera.heightOffset = 15; // Height above target (higher for isometric-like view)
-    this.camera.rotationOffset = 180; // Follow from behind
+    // OLD SETTINGS (commented out 2026-02-09):
+    // this.camera.radius = 18;
+    // this.camera.heightOffset = 15;
+    // this.camera.rotationOffset = 180;
+    // NEW SETTINGS (2026-02-09):
+    this.camera.radius = 12.0;        // Distance from target (closer view)
+    this.camera.heightOffset = 8.0;   // Height above target
+    this.camera.rotationOffset = 270.0; // Camera follows from the side
     this.camera.cameraAcceleration = 0.05; // Smooth acceleration
     this.camera.maxCameraSpeed = 20; // Maximum speed
 
@@ -312,7 +320,13 @@ export class BoardScene {
       } catch (e) { }
 
       const material = new StandardMaterial(`tile_mat_${i}`, this.scene);
-      material.diffuseColor = new Color3(0.5, 0.5, 0.5);
+      // First tile (start) and last tile (finish) are black
+      if (i === 0 || i === positions.length - 1) {
+        material.diffuseColor = new Color3(0.1, 0.1, 0.1); // Black for start/finish
+        console.log(`[TILE] Tile ${i} set to BLACK (${i === 0 ? 'START' : 'FINISH'})`);
+      } else {
+        material.diffuseColor = new Color3(0.5, 0.5, 0.5); // Gray for normal tiles
+      }
       material.specularColor = new Color3(0.15, 0.15, 0.15);
       material.roughness = 0.7;
       tile.material = material;
@@ -382,6 +396,10 @@ export class BoardScene {
     gameState.tiles.forEach((tile, index) => {
       const mesh = this.tiles[index];
       if (!mesh) return;
+
+      // Skip tiles 0 (start) and 49 (finish) - they should stay black
+      if (index === 0 || index === this.tiles.length - 1) return;
+
       const material = mesh.material as StandardMaterial;
       switch (tile.type) {
         case TileType.GREEN:
@@ -433,14 +451,79 @@ export class BoardScene {
 
   /**
    * Update camera to follow the character at the given tile position
+   * During movement: camera follows directly (handled by movePawn)
+   * After movement/switching players: smooth transition to new player
    */
   private updateCameraFollow(tileIndex: number): void {
     if (!this.camera || tileIndex < 0 || tileIndex >= this.tiles.length) return;
     const tile = this.tiles[tileIndex];
     if (!tile) return;
 
-    // Set camera to follow the tile position
-    this.camera.lockedTarget = tile;
+    console.log('[CAMERA] updateCameraFollow called for tile', tileIndex, 'isMoving:', this.isMoving);
+
+    // During movement, don't change target - the camera is already following the pawn in movePawn
+    if (this.isMoving) {
+      return;
+    }
+
+    // Get target position for smooth camera transition
+    const targetPosition = tile.position.clone();
+
+    // Get current camera position and target
+    const currentCameraPos = this.camera.position.clone();
+    const currentTarget = this.camera.lockedTarget;
+
+    // If no valid target yet or target is disposed, just set directly (no animation)
+    if (!currentTarget || !currentTarget.position) {
+      this.camera.lockedTarget = tile;
+      console.log('[CAMERA] Camera locked directly to tile', tileIndex);
+      return;
+    }
+
+    const startTargetPos = currentTarget.position.clone();
+
+    // Calculate camera offset from current target
+    const cameraOffset = currentCameraPos.subtract(startTargetPos);
+
+    // Create temporary target for smooth transition
+    const tempTarget = MeshBuilder.CreateBox('cameraTransitionTarget', { size: 0.01 }, this.scene);
+    tempTarget.isVisible = false;
+    tempTarget.position = startTargetPos.clone();
+    this.camera.lockedTarget = tempTarget;
+
+    // Smooth transition over 60 frames (1 second)
+    let frame = 0;
+    const totalFrames = 60;
+
+    console.log('[CAMERA] Starting smooth transition from', startTargetPos.toString(), 'to', targetPosition.toString());
+
+    const transitionObserver = this.scene.onBeforeRenderObservable.add(() => {
+      // If movement started, abort the transition
+      if (this.isMoving) {
+        this.scene.onBeforeRenderObservable.remove(transitionObserver);
+        tempTarget.dispose();
+        console.log('[CAMERA] Transition aborted - movement started');
+        return;
+      }
+
+      frame++;
+      const t = Math.min(frame / totalFrames, 1);
+      // Ease in-out
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+      // Interpolate target position
+      tempTarget.position = Vector3.Lerp(startTargetPos, targetPosition, eased);
+      // Move camera to maintain offset
+      this.camera.position = tempTarget.position.add(cameraOffset);
+
+      if (frame >= totalFrames) {
+        // Transition complete
+        this.scene.onBeforeRenderObservable.remove(transitionObserver);
+        this.camera.lockedTarget = tile;
+        tempTarget.dispose();
+        console.log('[CAMERA] Smooth transition complete to tile', tileIndex);
+      }
+    });
   }
 
 
@@ -455,11 +538,18 @@ export class BoardScene {
         const tile = this.tiles[player.pawnPosition];
         if (tile) {
           const offset = this.getPawnOffset(player.id, players.length);
-          // Only snap to position if not moving?
-          // For now, snap, unless we want to interpolate.
-          // But movePawn handles interpolation.
-          // We should only snap if the distance is far (jump) or initialization.
-          pawn.position = tile.position.clone().add(new Vector3(offset.x, 0.65, offset.z));
+
+          // Get the character-specific Y offset (if loaded yet), otherwise use 0
+          const characterYOffset = this.pawnYOffsets.get(player.id) || 0;
+
+          // Position pawn: tile position + horizontal offset + character Y offset
+          // The characterYOffset raises the model so feet touch the tile surface
+          const finalY = characterYOffset;
+          pawn.position = tile.position.clone().add(new Vector3(offset.x, finalY, offset.z));
+
+          // Debug logging for pawn positioning
+          console.log(`[PAWN] Player ${player.id} at tile ${player.pawnPosition}:`,
+            `Tile Y: ${tile.position.y.toFixed(2)}, CharOffset: ${characterYOffset.toFixed(2)}, Final Y: ${pawn.position.y.toFixed(2)}`);
 
           // Update rotation to face board center based on tile position
           pawn.rotation.y = this.getRotationForTile(player.pawnPosition);
@@ -478,11 +568,11 @@ export class BoardScene {
   /**
    * Calculate Y rotation for character in linear path
    * @param tileIndex - The tile index (0-49)
-   * @returns Y rotation in radians (always 0 for linear path - facing forward)
+   * @returns Y rotation in radians (90 degrees right to match camera at rotationOffset 270)
    */
   private getRotationForTile(tileIndex: number): number {
-    // In linear layout, all characters face forward along +Z axis
-    return 0;
+    // Rotate character 90 degrees right (π/2 radians) to match camera at rotationOffset 270
+    return Math.PI / 2;  // 90 degrees in radians
   }
 
   private createPawn(playerId: number, modelPath: string): void {
@@ -507,10 +597,18 @@ export class BoardScene {
       '/character/',
       filename,
       this.scene,
-      (meshes) => {
+      (meshes, particleSystems, skeletons, animationGroups) => {
         if (meshes.length === 0) {
           this.createFallbackPawn(playerId);
           return;
+        }
+
+        // Store animation groups and stop them (character should be idle by default)
+        if (animationGroups && animationGroups.length > 0) {
+          this.pawnAnimationGroups.set(playerId, animationGroups);
+          // Stop all animations - character starts idle
+          animationGroups.forEach(ag => ag.stop());
+          console.log(`Player ${playerId} has ${animationGroups.length} animation groups: ${animationGroups.map(ag => ag.name).join(', ')}`);
         }
 
         // SPECIAL CASE: Some models have complex hierarchies - only parent the root node
@@ -602,16 +700,22 @@ export class BoardScene {
           mesh.refreshBoundingInfo();
         });
 
-        // STEP 7: Recalculate minY after scaling and position so feet touch ground
-        let minY_final = Infinity;
+        // STEP 7: Calculate Y offset needed to place character's feet at ground level
+        // We store this offset and apply it in updatePawnPositions
+        // Note: pawn may already be positioned, so we convert world Y to local Y
+        let minY_world = Infinity;
         meshes.forEach((mesh) => {
           const bb = mesh.getBoundingInfo().boundingBox;
-          minY_final = Math.min(minY_final, bb.minimumWorld.y);
+          minY_world = Math.min(minY_world, bb.minimumWorld.y);
         });
 
-        pawn.position.y = -minY_final + 0.1;
+        // Convert world min Y to local min Y (relative to pawn position)
+        // Then negate to get the offset needed to raise feet to Y=0 (tile surface)
+        const localMinY = minY_world - pawn.position.y;
+        const yOffset = -localMinY;
+        this.pawnYOffsets.set(playerId, yOffset);
 
-        console.log(`Character ${playerId} loaded: ${filename}, scale=${scale.toFixed(4)}, posY=${pawn.position.y.toFixed(2)}`);
+        console.log(`Character ${playerId} loaded: ${filename}, scale=${scale.toFixed(4)}, minY_world=${minY_world.toFixed(2)}, pawnY=${pawn.position.y.toFixed(2)}, yOffset=${yOffset.toFixed(2)}`);
 
         this.startIdleAnimation(playerId);
       },
@@ -639,9 +743,43 @@ export class BoardScene {
   }
 
   private startIdleAnimation(playerId: number): void {
-    const pawn = this.pawns.get(playerId);
-    if (!pawn) return;
-    // Idle logic
+    // Stop all animations - character in idle pose
+    const animationGroups = this.pawnAnimationGroups.get(playerId);
+    if (animationGroups) {
+      animationGroups.forEach(ag => ag.stop());
+    }
+  }
+
+  /**
+   * Start walking animation for a player's character
+   */
+  private startWalkAnimation(playerId: number): void {
+    const animationGroups = this.pawnAnimationGroups.get(playerId);
+    if (!animationGroups || animationGroups.length === 0) return;
+
+    // Try to find a walk/run animation, otherwise play the first animation
+    const walkAnim = animationGroups.find(ag =>
+      ag.name.toLowerCase().includes('walk') ||
+      ag.name.toLowerCase().includes('run') ||
+      ag.name.toLowerCase().includes('move')
+    ) || animationGroups[0];
+
+    if (walkAnim) {
+      walkAnim.start(true); // true = loop
+      console.log(`Started walk animation: ${walkAnim.name} for player ${playerId}`);
+    }
+  }
+
+  /**
+   * Stop walking animation and return to idle
+   */
+  private stopWalkAnimation(playerId: number): void {
+    const animationGroups = this.pawnAnimationGroups.get(playerId);
+    if (!animationGroups) return;
+
+    // Stop all animations
+    animationGroups.forEach(ag => ag.stop());
+    console.log(`Stopped walk animation for player ${playerId}`);
   }
 
   setActiveTurn(active: boolean): void {
@@ -661,10 +799,54 @@ export class BoardScene {
     const pawn = this.pawns.get(playerId);
     if (!pawn) return;
 
-    // Set camera to follow this pawn
+    // Create a camera target that follows the pawn during movement
+    const cameraFollowTarget = MeshBuilder.CreateBox('cameraFollowTarget', { size: 0.01 }, this.scene);
+    cameraFollowTarget.isVisible = false;
+    cameraFollowTarget.position = pawn.position.clone();
+
+    console.log('[CAMERA] Created follow target at:', pawn.position.toString());
+
+    // Store the initial camera offset from pawn (we'll maintain this offset during movement)
+    const cameraOffset = this.camera ? this.camera.position.subtract(pawn.position) : new Vector3(0, 15, -18);
+
+    console.log('[CAMERA] Camera offset:', cameraOffset.toString());
+
+    // Set camera to follow target mesh initially
     if (this.camera) {
-      this.camera.lockedTarget = pawn;
+      this.camera.lockedTarget = cameraFollowTarget;
     }
+
+    let frameCount = 0;
+    // Register a before-render callback to DIRECTLY move camera to follow pawn
+    const followObserver = this.scene.onBeforeRenderObservable.add(() => {
+      if (pawn && this.camera) {
+        // Calculate target camera position (pawn position + offset)
+        const targetCameraPos = pawn.position.add(cameraOffset);
+
+        // Smoothly interpolate camera position toward target (lerp factor 0.5 = fast, 1.0 = instant)
+        this.camera.position = Vector3.Lerp(this.camera.position, targetCameraPos, 0.5);
+
+        // Also update what the camera is looking at - both the mesh position AND force camera target
+        cameraFollowTarget.position.copyFrom(pawn.position);
+        this.camera.setTarget(pawn.position);
+
+        if (frameCount % 60 === 0) {
+          console.log('[CAMERA] Frame', frameCount, 'pawn:', pawn.position.toString(), 'camera:', this.camera.position.toString());
+        }
+        frameCount++;
+      }
+    });
+
+    // Mark movement as in progress (disables smooth camera transitions)
+    this.isMoving = true;
+
+    // Cleanup function - no settings to restore now
+    const restoreCameraSettings = () => {
+      console.log('[CAMERA] Movement complete');
+    };
+
+    // Start walking animation when movement begins
+    this.startWalkAnimation(playerId);
 
     return new Promise((resolve) => {
       let currentPos = startPosition;
@@ -672,18 +854,44 @@ export class BoardScene {
       const numPlayers = this.pawns.size;
       const offset = this.getPawnOffset(playerId, numPlayers);
 
+      // Cleanup function to remove observer and target mesh
+      const cleanupCameraFollow = () => {
+        this.scene.onBeforeRenderObservable.remove(followObserver);
+        cameraFollowTarget.dispose();
+        restoreCameraSettings(); // Restore original camera acceleration
+      };
+
       const moveStep = () => {
         if (stepsMoved >= steps) {
+          // Stop walking animation when movement completes
+          this.stopWalkAnimation(playerId);
+          // Mark movement as complete (enables smooth camera transitions for next player)
+          this.isMoving = false;
+          // Clean up camera follow system
+          cleanupCameraFollow();
+
+          // Set camera to lock onto the final tile position (not the disposed follow target)
+          const finalTile = this.tiles[(startPosition + steps) % 50];
+          if (finalTile && this.camera) {
+            this.camera.lockedTarget = finalTile;
+            console.log('[CAMERA] Locked to final tile at position', (startPosition + steps) % 50);
+          }
+
           resolve();
           return;
         }
         const nextPos = (currentPos + 1) % 50;
         const nextTileMesh = this.tiles[nextPos];
         if (!nextTileMesh) {
+          this.stopWalkAnimation(playerId);
+          this.isMoving = false;
+          cleanupCameraFollow();
           resolve();
           return;
         }
-        const targetPos = nextTileMesh.position.clone().add(new Vector3(offset.x, 0.65, offset.z));
+        // Get character-specific Y offset for proper positioning
+        const characterYOffset = this.pawnYOffsets.get(playerId) || 0;
+        const targetPos = nextTileMesh.position.clone().add(new Vector3(offset.x, characterYOffset, offset.z));
         const startPos = pawn.position.clone();
 
         // Create animation for position
@@ -697,7 +905,7 @@ export class BoardScene {
 
         const keys = [
           { frame: 0, value: startPos },
-          { frame: 20, value: targetPos }
+          { frame: 60, value: targetPos }  // 60 frames = 1 second per tile at 60fps
         ];
         moveAnim.setKeys(keys);
 
@@ -708,7 +916,7 @@ export class BoardScene {
 
         pawn.animations = [moveAnim];
 
-        this.scene.beginAnimation(pawn, 0, 20, false, 1, () => {
+        this.scene.beginAnimation(pawn, 0, 60, false, 1, () => {
           stepsMoved++;
           currentPos = nextPos;
           // Keep facing forward (rotation already set to 0)
@@ -1993,18 +2201,19 @@ ${path.map(p => `  { x: ${p.x}, z: ${p.z} },`).join('\n')}
    */
   private getRotationForDiceResult(result: number): Vector3 {
     const piHalf = Math.PI / 2;
+    const pi = Math.PI;
 
-    // Tested mappings for this dice model:
-    // - Face 3 & 4 are on X-axis (0 and π)
-    // - Face 5 & 6 are on X-axis (±π/2)  
-    // - Face 1 & 2 are on Y-axis (±π/2)
+    // FIXED 2026-02-09: Based on user testing
+    // - Case 5 works ✓
+    // - 3↔4 were swapped, 5↔6 were swapped
+    // - Z=-π/2 shows face 6, Z=π/2 shows face 5
     switch (result) {
-      case 1: return new Vector3(0, -piHalf, 0);        // 1 on top (swapped with 2)
-      case 2: return new Vector3(0, piHalf, 0);         // 2 on top (swapped with 1)
-      case 3: return new Vector3(0, 0, 0);              // 3 on top ✓ (tested working)
-      case 4: return new Vector3(Math.PI, 0, 0);        // 4 on top ✓ (tested working)
-      case 5: return new Vector3(-piHalf, 0, 0);        // 5 on top (was showing for case 6)
-      case 6: return new Vector3(piHalf, 0, 0);         // 6 on top (was showing for case 1)
+      case 1: return new Vector3(0, 0, 0);                // 1 facing camera (try Z=0)
+      case 2: return new Vector3(-piHalf, piHalf, piHalf); // 2 facing camera (added -π/2 to X for 90° down)
+      case 3: return new Vector3(pi, -piHalf, piHalf);    // 3 facing camera ✓ WORKS
+      case 4: return new Vector3(pi, piHalf, piHalf);     // 4 facing camera ✓ WORKS
+      case 5: return new Vector3(pi, 0, piHalf);          // 5 facing camera ✓ WORKS
+      case 6: return new Vector3(piHalf, pi, piHalf);           // 6 facing camera ✓ (rotated 90° down)
       default: return new Vector3(0, 0, 0);
     }
   }

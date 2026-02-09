@@ -8,16 +8,19 @@ import { GameState as GameStateType } from '../core/game-state';
 export class HUD {
   private container: HTMLElement;
   private rollButton!: HTMLButtonElement;
+  private testTriviaButton!: HTMLButtonElement;
   private turnCounter!: HTMLElement;
   private pointsDisplay!: HTMLElement;
   private tileMessage!: HTMLElement;
   private dicePopup!: HTMLElement;
   private leaderboard!: HTMLElement;
   private onRollDice: () => void;
+  private onTestTrivia?: () => void;
 
-  constructor(container: HTMLElement, onRollDice: () => void) {
+  constructor(container: HTMLElement, onRollDice: () => void, onTestTrivia?: () => void) {
     this.container = container;
     this.onRollDice = onRollDice;
+    this.onTestTrivia = onTestTrivia;
     this.setupUI();
   }
 
@@ -93,6 +96,21 @@ export class HUD {
       this.onRollDice();
     });
     rollContainer.appendChild(this.rollButton);
+
+    // Test Trivia Button (for debugging)
+    if (this.onTestTrivia) {
+      this.testTriviaButton = document.createElement('button');
+      this.testTriviaButton.className = 'roll-button test-trivia-btn';
+      this.testTriviaButton.innerHTML = `
+        <span class="roll-icon">❓</span>
+        <span class="roll-text">اختبار سؤال</span>
+      `;
+      this.testTriviaButton.addEventListener('click', () => {
+        this.onTestTrivia?.();
+      });
+      rollContainer.appendChild(this.testTriviaButton);
+    }
+
     this.container.appendChild(rollContainer);
 
     // Tile message (shows when landing on a tile)
